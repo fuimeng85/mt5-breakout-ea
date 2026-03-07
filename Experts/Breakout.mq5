@@ -660,6 +660,7 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
    int count = 0;
    string tfStr = EnumToString(tf);
    string friendlyName = GetTFFriendlyName(tf);
+   bool needsH1Guard = (tf == PERIOD_H1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -670,8 +671,18 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
 
       if(StringFind(comment, "TF_" + tfStr) >= 0)
          count++;
-      else if(StringFind(comment, friendlyName) >= 0 && StringFind(comment, (tf == PERIOD_H1 ? "1H" : "")) >= 0)
-         count++;
+      else if(StringFind(comment, friendlyName) >= 0)
+      {
+         // legacy fallback: avoid ambiguous 1H/15min overlap in very old comments
+         if(needsH1Guard)
+         {
+            if(StringFind(comment, "15min") < 0) count++;
+         }
+         else
+         {
+            count++;
+         }
+      }
    }
    return count;
 }
@@ -923,7 +934,15 @@ int UpdateHTFState()
       double atr[];
       ArraySetAsSeries(atr, true);
       if(CopyBuffer(g_atrHTF, 0, 1, 1, atr) < 1 || width < atr[0] * InpATRMult)
-      { g_dir = DIR_NONE; g_breakLevel = 0.0; return 0; }
+      {
+         g_dir = DIR_NONE;
+         g_breakLevel = 0.0;
+         g_breakCandleLow = 0.0; g_breakCandleHigh = 0.0;
+         g_xBarsLow = 0.0; g_xBarsHigh = 0.0;
+         g_peakHigh = 0.0;
+         g_troughLow = 0.0;
+         return 0;
+      }
    }
 
    if(g_dir == DIR_NONE)
@@ -1463,29 +1482,37 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
 //=========================== INIT / TICK ============================
 int OnInit()
 {
+   bool badHandle = false;
+
    trade.SetExpertMagicNumber((int)InpMagic);
    if(InpUseATRFilter) g_atrHTF = iATR(_Symbol, InpHTF, InpATRPeriod);
+   if(InpUseATRFilter && g_atrHTF==INVALID_HANDLE) badHandle = true;
    
    // Entry filter handles (EMAFilterPer)
    g_fastH4=iMA(_Symbol,PERIOD_H4,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowH4=iMA(_Symbol,PERIOD_H4,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaH4 =iMA(_Symbol,PERIOD_H4,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastH4==INVALID_HANDLE || g_slowH4==INVALID_HANDLE || g_emaH4==INVALID_HANDLE) badHandle = true;
 
    g_fastH1=iMA(_Symbol,PERIOD_H1,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowH1=iMA(_Symbol,PERIOD_H1,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaH1 =iMA(_Symbol,PERIOD_H1,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastH1==INVALID_HANDLE || g_slowH1==INVALID_HANDLE || g_emaH1==INVALID_HANDLE) badHandle = true;
 
    g_fastM30=iMA(_Symbol,PERIOD_M30,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowM30=iMA(_Symbol,PERIOD_M30,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaM30 =iMA(_Symbol,PERIOD_M30,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastM30==INVALID_HANDLE || g_slowM30==INVALID_HANDLE || g_emaM30==INVALID_HANDLE) badHandle = true;
 
    g_fastM15=iMA(_Symbol,PERIOD_M15,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowM15=iMA(_Symbol,PERIOD_M15,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaM15 =iMA(_Symbol,PERIOD_M15,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastM15==INVALID_HANDLE || g_slowM15==INVALID_HANDLE || g_emaM15==INVALID_HANDLE) badHandle = true;
 
    g_fastM5=iMA(_Symbol,PERIOD_M5,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowM5=iMA(_Symbol,PERIOD_M5,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaM5 =iMA(_Symbol,PERIOD_M5,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastM5==INVALID_HANDLE || g_slowM5==INVALID_HANDLE || g_emaM5==INVALID_HANDLE) badHandle = true;
 
    // EMA Exit handles (InpEMAExitPeriod)
    g_exitEmaH4  = iMA(_Symbol, PERIOD_H4,  InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
@@ -1493,6 +1520,8 @@ int OnInit()
    g_exitEmaM30 = iMA(_Symbol, PERIOD_M30, InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_exitEmaM15 = iMA(_Symbol, PERIOD_M15, InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_exitEmaM5  = iMA(_Symbol, PERIOD_M5,  InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_exitEmaH4==INVALID_HANDLE || g_exitEmaH1==INVALID_HANDLE ||
+      g_exitEmaM30==INVALID_HANDLE || g_exitEmaM15==INVALID_HANDLE || g_exitEmaM5==INVALID_HANDLE) badHandle = true;
    
    // EMA Trail SL handles (InpEMATrailPeriod)
    g_trailEmaH4  = iMA(_Symbol, PERIOD_H4,  InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
@@ -1501,9 +1530,11 @@ int OnInit()
    g_trailEmaM15 = iMA(_Symbol, PERIOD_M15, InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_trailEmaM5  = iMA(_Symbol, PERIOD_M5,  InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_trailEmaChart = iMA(_Symbol, (ENUM_TIMEFRAMES)_Period, InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_trailEmaH4==INVALID_HANDLE || g_trailEmaH1==INVALID_HANDLE ||
+      g_trailEmaM30==INVALID_HANDLE || g_trailEmaM15==INVALID_HANDLE ||
+      g_trailEmaM5==INVALID_HANDLE || g_trailEmaChart==INVALID_HANDLE) badHandle = true;
 
-   if(g_fastH4==INVALID_HANDLE || g_fastH1==INVALID_HANDLE ||
-      g_exitEmaH4==INVALID_HANDLE || g_trailEmaH4==INVALID_HANDLE)
+   if(badHandle)
    {
       Print("Handle error");
       return INIT_FAILED;
