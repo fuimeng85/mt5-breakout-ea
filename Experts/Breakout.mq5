@@ -139,6 +139,18 @@ input double          InpRiskPercent    = 1.0;
 input double          InpFixedLot       = 0.01;
 input ulong           InpMagic          = 88888;
 
+input group "=== 6B) Per-TF Manual Lot (Optional) ==="
+input bool            InpM5_UseManualLot  = false;
+input double          InpM5_ManualLot     = 0.01;
+input bool            InpM15_UseManualLot = false;
+input double          InpM15_ManualLot    = 0.01;
+input bool            InpM30_UseManualLot = false;
+input double          InpM30_ManualLot    = 0.01;
+input bool            InpH1_UseManualLot  = false;
+input double          InpH1_ManualLot     = 0.01;
+input bool            InpH4_UseManualLot  = false;
+input double          InpH4_ManualLot     = 0.01;
+
 input group "=== 7) Time Filter (交易时间控制) ==="
 input bool            InpUseTimeFilter  = false;
 input int             InpStartHour      = 9;
@@ -651,6 +663,26 @@ int TF_TrailStep(ENUM_TIMEFRAMES tf)
    if(tf==PERIOD_M15) return InpM15_TrailStepPts;
    if(tf==PERIOD_M5)  return InpM5_TrailStepPts;
    return 50;
+}
+
+bool TF_UseManualLot(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_UseManualLot;
+   if(tf==PERIOD_H1)  return InpH1_UseManualLot;
+   if(tf==PERIOD_M30) return InpM30_UseManualLot;
+   if(tf==PERIOD_M15) return InpM15_UseManualLot;
+   if(tf==PERIOD_M5)  return InpM5_UseManualLot;
+   return false;
+}
+
+double TF_ManualLot(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_ManualLot;
+   if(tf==PERIOD_H1)  return InpH1_ManualLot;
+   if(tf==PERIOD_M30) return InpM30_ManualLot;
+   if(tf==PERIOD_M15) return InpM15_ManualLot;
+   if(tf==PERIOD_M5)  return InpM5_ManualLot;
+   return InpFixedLot;
 }
 
 
@@ -1223,6 +1255,8 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
    if(sl == 0.0) return false;
    double tp = isBuy ? entryPrice + InpHardTP * P() : entryPrice - InpHardTP * P();
    double lot = CalcAutoLotByRisk(entryPrice, sl);
+   if(TF_UseManualLot(entryTF))
+      lot = NormalizeLot(TF_ManualLot(entryTF));
 
    if(isBuy) { if(sl >= entryPrice || tp <= entryPrice) return false; }
    else      { if(sl <= entryPrice || tp >= entryPrice) return false; }
