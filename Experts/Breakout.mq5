@@ -157,6 +157,12 @@ input int InpH4_TrailStartPts  = 1500;
 input int InpH4_TrailDistPts   = 500;
 input int InpH4_TrailStepPts   = 50;
 
+input group "=== 5D) Per-TF Cooldown After TP (Bars) ==="
+input int InpM5_TPCoolBars  = 0;
+input int InpM15_TPCoolBars = 0;
+input int InpM30_TPCoolBars = 0;
+input int InpH1_TPCoolBars  = 0;
+input int InpH4_TPCoolBars  = 0;
 
 input group "=== 6) Money Management ==="
 input bool            InpUseAutoLot     = false;
@@ -230,6 +236,8 @@ int g_dbgMacdPanelH = INVALID_HANDLE;
 
 datetime g_lastBarH4  = 0, g_lastBarH1  = 0, g_lastBarM30 = 0, g_lastBarM15 = 0, g_lastBarM5  = 0;
 datetime g_lastSigH4  = 0, g_lastSigH1  = 0, g_lastSigM30 = 0, g_lastSigM15 = 0, g_lastSigM5  = 0;
+
+datetime g_lastTPCloseH4=0, g_lastTPCloseH1=0, g_lastTPCloseM30=0, g_lastTPCloseM15=0, g_lastTPCloseM5=0;
 
 bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false;
 
@@ -848,6 +856,49 @@ EMacdScanMode TF_BreakScanMode(ENUM_TIMEFRAMES tf)
    if(tf==PERIOD_M15) return InpM15_BreakScanMode;
    if(tf==PERIOD_M5)  return InpM5_BreakScanMode;
    return MACD_SCAN_CROSS;
+}
+
+int TF_TPCoolBars(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_TPCoolBars;
+   if(tf==PERIOD_H1)  return InpH1_TPCoolBars;
+   if(tf==PERIOD_M30) return InpM30_TPCoolBars;
+   if(tf==PERIOD_M15) return InpM15_TPCoolBars;
+   if(tf==PERIOD_M5)  return InpM5_TPCoolBars;
+   return 0;
+}
+
+datetime TF_LastTPCloseTime(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return g_lastTPCloseH4;
+   if(tf==PERIOD_H1)  return g_lastTPCloseH1;
+   if(tf==PERIOD_M30) return g_lastTPCloseM30;
+   if(tf==PERIOD_M15) return g_lastTPCloseM15;
+   if(tf==PERIOD_M5)  return g_lastTPCloseM5;
+   return 0;
+}
+
+void TF_SetLastTPCloseTime(ENUM_TIMEFRAMES tf, datetime t)
+{
+   if(tf==PERIOD_H4)  g_lastTPCloseH4=t;
+   if(tf==PERIOD_H1)  g_lastTPCloseH1=t;
+   if(tf==PERIOD_M30) g_lastTPCloseM30=t;
+   if(tf==PERIOD_M15) g_lastTPCloseM15=t;
+   if(tf==PERIOD_M5)  g_lastTPCloseM5=t;
+}
+
+bool TF_PassTPCooldown(ENUM_TIMEFRAMES tf)
+{
+   int cool=TF_TPCoolBars(tf);
+   if(cool<=0) return true;
+
+   datetime tpT=TF_LastTPCloseTime(tf);
+   if(tpT<=0) return true;
+
+   int sh=iBarShift(_Symbol, tf, tpT, false);
+   if(sh<0) return true;
+
+   return (sh >= cool);
 }
 
 
@@ -1736,6 +1787,13 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
       return;
    }
 
+   if(!TF_PassTPCooldown(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Blocked by TP cooldown: ", EnumToString(tf), " coolBars=", TF_TPCoolBars(tf));
+      return;
+   }
+
    if(!IsNewBar(tf)) return;
 
    datetime sigT = iTime(_Symbol, tf, 1);
@@ -1769,6 +1827,13 @@ void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
       return;
    }
 
+   if(!TF_PassTPCooldown(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Blocked by TP cooldown: ", EnumToString(tf), " coolBars=", TF_TPCoolBars(tf));
+      return;
+   }
+
    if(!IsNewBar(tf)) return;
 
    datetime sigT = iTime(_Symbol, tf, 1);
@@ -1790,6 +1855,7 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
    if(!TF_UseBreakScan(tf)) return false;
    if(!IsInTradingTime()) return false;
    if(HasMaxOrdersForTF(tf)) return false;
+   if(!TF_PassTPCooldown(tf)) return false;
 
    int lookback = TF_BreakScanBars(tf);
    EMacdScanMode mode = TF_BreakScanMode(tf);
@@ -1953,6 +2019,37 @@ void OnTick()
             TryEntryOnTF(PERIOD_M5, dir);
       }
    }
+}
+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest& request,
+                        const MqlTradeResult& result)
+{
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   ulong dealTicket = trans.deal;
+   if(dealTicket==0) return;
+   if(!HistoryDealSelect(dealTicket)) return;
+
+   string sym = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+   if(sym != _Symbol) return;
+
+   long mg = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+   if((ulong)mg != InpMagic) return;
+
+   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT) return;
+
+   long reason = HistoryDealGetInteger(dealTicket, DEAL_REASON);
+   if(reason != DEAL_REASON_TP) return;
+
+   string cmt = HistoryDealGetString(dealTicket, DEAL_COMMENT);
+   ENUM_TIMEFRAMES tf = ParseEntryTF(cmt, (ENUM_TIMEFRAMES)_Period);
+
+   datetime dt = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+   TF_SetLastTPCloseTime(tf, dt);
+
+   if(InpPrintExits)
+      Print("TP Cooldown Start: ", EnumToString(tf), " at ", TimeToString(dt));
 }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
