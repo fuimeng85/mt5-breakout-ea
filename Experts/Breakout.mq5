@@ -49,6 +49,31 @@ input bool            InpUseM30         = true;
 input bool            InpUseM15         = true;
 input bool            InpUseM5          = true;
 
+input group "=== 2B) Per-TF Ignore Donchian (MACD-only Entry) ==="
+input bool            InpH4_IgnoreDonchian  = false;
+input bool            InpH1_IgnoreDonchian  = false;
+input bool            InpM30_IgnoreDonchian = false;
+input bool            InpM15_IgnoreDonchian = false;
+input bool            InpM5_IgnoreDonchian  = false;
+
+input group "=== 2C) Per-TF Breakout Candle Scan Entry ==="
+enum EMacdScanMode { MACD_SCAN_CROSS=0, MACD_SCAN_FADE=1 };
+input bool          InpH4_UseBreakScan     = false;
+input int           InpH4_BreakScanBars    = 5;
+input EMacdScanMode InpH4_BreakScanMode    = MACD_SCAN_CROSS;
+input bool          InpH1_UseBreakScan     = false;
+input int           InpH1_BreakScanBars    = 5;
+input EMacdScanMode InpH1_BreakScanMode    = MACD_SCAN_CROSS;
+input bool          InpM30_UseBreakScan    = false;
+input int           InpM30_BreakScanBars   = 5;
+input EMacdScanMode InpM30_BreakScanMode   = MACD_SCAN_CROSS;
+input bool          InpM15_UseBreakScan    = false;
+input int           InpM15_BreakScanBars   = 5;
+input EMacdScanMode InpM15_BreakScanMode   = MACD_SCAN_CROSS;
+input bool          InpM5_UseBreakScan     = false;
+input int           InpM5_BreakScanBars    = 5;
+input EMacdScanMode InpM5_BreakScanMode    = MACD_SCAN_CROSS;
+
 input group "=== 3) Filters & Order Management (Per TF) ==="
 input int             InpMaxSpreadPts   = 30;
 input bool            InpUseNewsFilter  = false;
@@ -139,6 +164,18 @@ input double          InpRiskPercent    = 1.0;
 input double          InpFixedLot       = 0.01;
 input ulong           InpMagic          = 88888;
 
+input group "=== 6B) Per-TF Manual Lot (Optional) ==="
+input bool            InpM5_UseManualLot  = false;
+input double          InpM5_ManualLot     = 0.01;
+input bool            InpM15_UseManualLot = false;
+input double          InpM15_ManualLot    = 0.01;
+input bool            InpM30_UseManualLot = false;
+input double          InpM30_ManualLot    = 0.01;
+input bool            InpH1_UseManualLot  = false;
+input double          InpH1_ManualLot     = 0.01;
+input bool            InpH4_UseManualLot  = false;
+input double          InpH4_ManualLot     = 0.01;
+
 input group "=== 7) Time Filter (交易时间控制) ==="
 input bool            InpUseTimeFilter  = false;
 input int             InpStartHour      = 9;
@@ -151,6 +188,13 @@ input bool            InpPrintHTF       = true;
 input bool            InpPrintBlocks    = true;
 input bool            InpPrintSignals   = true;
 input bool            InpPrintExits     = true;
+
+input group "=== 8B) Visual Debug: EA MACD Panel ==="
+input bool            InpShowEAMACDPanel = false;
+input ENUM_TIMEFRAMES InpShowEAMACD_TF   = PERIOD_H1;
+
+input group "=== 8C) UI: TF Toggle Buttons ==="
+input bool            InpShowTFButtons   = true;
 
 //============================== ENUMS ===============================
 enum EDir { DIR_NONE=0, DIR_BUY=1, DIR_SELL=-1 };
@@ -165,6 +209,7 @@ double   g_xBarsHigh       = 0.0;   // 最近X根HTF最高（SELL保护）
 double   g_peakHigh        = 0.0;   // 突破后最高价（用于百分比回撤保护 BUY）
 double   g_troughLow       = 0.0;   // 突破后最低价（用于百分比回撤保护 SELL）
 datetime g_lastHTFClosedT1 = 0;
+bool     g_newBreakoutSignal = false;
 int      g_atrHTF  = INVALID_HANDLE;
 
 // Entry filter handles (EMAFilterPer)
@@ -181,8 +226,12 @@ int g_exitEmaH4  = INVALID_HANDLE, g_exitEmaH1  = INVALID_HANDLE, g_exitEmaM30 =
 int g_trailEmaH4 = INVALID_HANDLE, g_trailEmaH1 = INVALID_HANDLE, g_trailEmaM30 = INVALID_HANDLE, g_trailEmaM15 = INVALID_HANDLE, g_trailEmaM5 = INVALID_HANDLE;
 int g_trailEmaChart = INVALID_HANDLE;
 
+int g_dbgMacdPanelH = INVALID_HANDLE;
+
 datetime g_lastBarH4  = 0, g_lastBarH1  = 0, g_lastBarM30 = 0, g_lastBarM15 = 0, g_lastBarM5  = 0;
 datetime g_lastSigH4  = 0, g_lastSigH1  = 0, g_lastSigM30 = 0, g_lastSigM15 = 0, g_lastSigM5  = 0;
+
+bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false;
 
 // --- per ticket modify throttle
 #define MAX_TRACK 200
@@ -553,6 +602,94 @@ void TM_DeleteAllObjects()
 }
 
 //==========================================================================================
+string TFButtonName(ENUM_TIMEFRAMES tf)
+{
+   return "EA_TF_BTN_" + EnumToString(tf);
+}
+
+bool TFEnabled(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return g_useH4;
+   if(tf==PERIOD_H1)  return g_useH1;
+   if(tf==PERIOD_M30) return g_useM30;
+   if(tf==PERIOD_M15) return g_useM15;
+   if(tf==PERIOD_M5)  return g_useM5;
+   return false;
+}
+
+void SetTFEnabled(ENUM_TIMEFRAMES tf, bool enabled)
+{
+   if(tf==PERIOD_H4)  g_useH4=enabled;
+   if(tf==PERIOD_H1)  g_useH1=enabled;
+   if(tf==PERIOD_M30) g_useM30=enabled;
+   if(tf==PERIOD_M15) g_useM15=enabled;
+   if(tf==PERIOD_M5)  g_useM5=enabled;
+}
+
+void TFButtonUpdate(ENUM_TIMEFRAMES tf)
+{
+   string name = TFButtonName(tf);
+   bool on = TFEnabled(tf);
+   string txt = GetTFFriendlyName(tf) + (on ? " ON" : " OFF");
+   ObjectSetString(0, name, OBJPROP_TEXT, txt);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, on ? clrLimeGreen : clrTomato);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrBlack);
+}
+
+void TFButtonsCreate()
+{
+   if(!InpShowTFButtons) return;
+
+   ENUM_TIMEFRAMES arr[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
+   int x=10, y=20, w=80, h=20, gap=4;
+
+   for(int i=0;i<5;i++)
+   {
+      string name = TFButtonName(arr[i]);
+      if(ObjectFind(0, name) < 0)
+      {
+         ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
+         ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+         ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+         ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + i*(h+gap));
+         ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+         ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+         ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+         ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      }
+      TFButtonUpdate(arr[i]);
+   }
+}
+
+void TFButtonsDelete()
+{
+   ENUM_TIMEFRAMES arr[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
+   for(int i=0;i<5;i++)
+   {
+      string name = TFButtonName(arr[i]);
+      if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
+   }
+}
+
+bool TFButtonTryToggle(const string obj)
+{
+   ENUM_TIMEFRAMES arr[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
+   for(int i=0;i<5;i++)
+   {
+      if(obj == TFButtonName(arr[i]))
+      {
+         SetTFEnabled(arr[i], !TFEnabled(arr[i]));
+         TFButtonUpdate(arr[i]);
+         if(InpPrintSignals)
+            Print("TF Toggle: ", EnumToString(arr[i]), " -> ", (TFEnabled(arr[i])?"ON":"OFF"));
+         return true;
+      }
+   }
+   return false;
+}
+
 bool IsInTradingTime()
 {
    if(!InpUseTimeFilter) return true;
@@ -653,6 +790,66 @@ int TF_TrailStep(ENUM_TIMEFRAMES tf)
    return 50;
 }
 
+bool TF_UseManualLot(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_UseManualLot;
+   if(tf==PERIOD_H1)  return InpH1_UseManualLot;
+   if(tf==PERIOD_M30) return InpM30_UseManualLot;
+   if(tf==PERIOD_M15) return InpM15_UseManualLot;
+   if(tf==PERIOD_M5)  return InpM5_UseManualLot;
+   return false;
+}
+
+double TF_ManualLot(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_ManualLot;
+   if(tf==PERIOD_H1)  return InpH1_ManualLot;
+   if(tf==PERIOD_M30) return InpM30_ManualLot;
+   if(tf==PERIOD_M15) return InpM15_ManualLot;
+   if(tf==PERIOD_M5)  return InpM5_ManualLot;
+   return InpFixedLot;
+}
+
+bool TF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_IgnoreDonchian;
+   if(tf==PERIOD_H1)  return InpH1_IgnoreDonchian;
+   if(tf==PERIOD_M30) return InpM30_IgnoreDonchian;
+   if(tf==PERIOD_M15) return InpM15_IgnoreDonchian;
+   if(tf==PERIOD_M5)  return InpM5_IgnoreDonchian;
+   return false;
+}
+
+bool TF_UseBreakScan(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_UseBreakScan;
+   if(tf==PERIOD_H1)  return InpH1_UseBreakScan;
+   if(tf==PERIOD_M30) return InpM30_UseBreakScan;
+   if(tf==PERIOD_M15) return InpM15_UseBreakScan;
+   if(tf==PERIOD_M5)  return InpM5_UseBreakScan;
+   return false;
+}
+
+int TF_BreakScanBars(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_BreakScanBars;
+   if(tf==PERIOD_H1)  return InpH1_BreakScanBars;
+   if(tf==PERIOD_M30) return InpM30_BreakScanBars;
+   if(tf==PERIOD_M15) return InpM15_BreakScanBars;
+   if(tf==PERIOD_M5)  return InpM5_BreakScanBars;
+   return 5;
+}
+
+EMacdScanMode TF_BreakScanMode(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_BreakScanMode;
+   if(tf==PERIOD_H1)  return InpH1_BreakScanMode;
+   if(tf==PERIOD_M30) return InpM30_BreakScanMode;
+   if(tf==PERIOD_M15) return InpM15_BreakScanMode;
+   if(tf==PERIOD_M5)  return InpM5_BreakScanMode;
+   return MACD_SCAN_CROSS;
+}
+
 
 // Support old & friendly
 int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
@@ -660,6 +857,7 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
    int count = 0;
    string tfStr = EnumToString(tf);
    string friendlyName = GetTFFriendlyName(tf);
+   bool needsH1Guard = (tf == PERIOD_H1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -670,8 +868,18 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
 
       if(StringFind(comment, "TF_" + tfStr) >= 0)
          count++;
-      else if(StringFind(comment, friendlyName) >= 0 && StringFind(comment, (tf == PERIOD_H1 ? "1H" : "")) >= 0)
-         count++;
+      else if(StringFind(comment, friendlyName) >= 0)
+      {
+         // legacy fallback: avoid ambiguous 1H/15min overlap in very old comments
+         if(needsH1Guard)
+         {
+            if(StringFind(comment, "15min") < 0) count++;
+         }
+         else
+         {
+            count++;
+         }
+      }
    }
    return count;
 }
@@ -888,6 +1096,8 @@ bool ComputeDonchianHTFEx(double &upper, double &lower, double &close1, double &
 
 int UpdateHTFState()
 {
+   g_newBreakoutSignal = false;
+
    datetime t1 = iTime(_Symbol, InpHTF, 1);
    if(t1 <= 0) return (int)g_dir;
    if(t1 == g_lastHTFClosedT1) return (int)g_dir;
@@ -923,7 +1133,15 @@ int UpdateHTFState()
       double atr[];
       ArraySetAsSeries(atr, true);
       if(CopyBuffer(g_atrHTF, 0, 1, 1, atr) < 1 || width < atr[0] * InpATRMult)
-      { g_dir = DIR_NONE; g_breakLevel = 0.0; return 0; }
+      {
+         g_dir = DIR_NONE;
+         g_breakLevel = 0.0;
+         g_breakCandleLow = 0.0; g_breakCandleHigh = 0.0;
+         g_xBarsLow = 0.0; g_xBarsHigh = 0.0;
+         g_peakHigh = 0.0;
+         g_troughLow = 0.0;
+         return 0;
+      }
    }
 
    if(g_dir == DIR_NONE)
@@ -932,6 +1150,7 @@ int UpdateHTFState()
       {
          g_dir        = DIR_BUY;
          g_breakLevel = up;
+         g_newBreakoutSignal = true;
 
          g_breakCandleLow  = low1;
          g_breakCandleHigh = high1;
@@ -946,6 +1165,7 @@ int UpdateHTFState()
       {
          g_dir        = DIR_SELL;
          g_breakLevel = lo;
+         g_newBreakoutSignal = true;
 
          g_breakCandleLow  = low1;
          g_breakCandleHigh = high1;
@@ -1125,6 +1345,66 @@ bool CheckMACDSignal(ENUM_TIMEFRAMES tf, int dir)
 }
 
 //=========================== ORDER FUNCTIONS ========================
+
+bool CheckMACDSignalAtShift(ENUM_TIMEFRAMES tf, int dir, int shift, EMacdScanMode mode)
+{
+   if(shift < 1) return false;
+
+   int fastH = FastH(tf), slowH = SlowH(tf), emaH = EmaH(tf);
+   if(fastH == INVALID_HANDLE || slowH == INVALID_HANDLE || emaH == INVALID_HANDLE) return false;
+
+   int barsNeed = MathMax(shift + InpSignalSMA + 5, shift + 3);
+
+   double fast[], slow[], ema[];
+   ArraySetAsSeries(fast, true);
+   ArraySetAsSeries(slow, true);
+   ArraySetAsSeries(ema, true);
+   if(CopyBuffer(fastH, 0, 0, barsNeed, fast) < barsNeed ||
+      CopyBuffer(slowH, 0, 0, barsNeed, slow) < barsNeed ||
+      CopyBuffer(emaH, 0, 0, shift + 2, ema) < shift + 2)
+      return false;
+
+   double mainLine[];
+   ArrayResize(mainLine, barsNeed);
+   for(int i=0;i<barsNeed;i++) mainLine[i]=fast[i]-slow[i];
+
+   double sigNow=0.0, sigPrev=0.0;
+   for(int i=shift; i<shift+InpSignalSMA && i<barsNeed; i++) sigNow += mainLine[i];
+   for(int i=shift+1; i<shift+1+InpSignalSMA && i<barsNeed; i++) sigPrev += mainLine[i];
+   sigNow  /= InpSignalSMA;
+   sigPrev /= InpSignalSMA;
+
+   double mainNow  = mainLine[shift];
+   double mainPrev = mainLine[shift+1];
+
+   double closeNow = iClose(_Symbol, tf, shift);
+   double emaNow   = ema[shift];
+   if(closeNow==0.0) return false;
+
+   if(mode == MACD_SCAN_CROSS)
+   {
+      if(dir==1)
+         return (mainPrev <= sigPrev && mainNow > sigNow && closeNow > emaNow);
+      return (mainPrev >= sigPrev && mainNow < sigNow && closeNow < emaNow);
+   }
+
+   double histNow  = mainNow - sigNow;
+   double histPrev = mainPrev - sigPrev;
+   bool isLightPink  = (histNow < 0 && histNow >= histPrev);
+   bool isLightGreen = (histNow >= 0 && histNow <= histPrev);
+   if(dir==1)
+      return (mainNow > 0 && sigNow > 0 && closeNow > emaNow && isLightPink);
+   return (mainNow < 0 && sigNow < 0 && closeNow < emaNow && isLightGreen);
+}
+
+bool HasMACDSignalInLookback(ENUM_TIMEFRAMES tf, int dir, int lookback, EMacdScanMode mode)
+{
+   if(lookback < 1) lookback = 1;
+   for(int sh=1; sh<=lookback; sh++)
+      if(CheckMACDSignalAtShift(tf, dir, sh, mode)) return true;
+   return false;
+}
+
 double CalculateInitialSL(ENUM_TIMEFRAMES tf, int dir)
 {
    MqlRates rates[]; ArraySetAsSeries(rates, true);
@@ -1204,6 +1484,8 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
    if(sl == 0.0) return false;
    double tp = isBuy ? entryPrice + InpHardTP * P() : entryPrice - InpHardTP * P();
    double lot = CalcAutoLotByRisk(entryPrice, sl);
+   if(TF_UseManualLot(entryTF))
+      lot = NormalizeLot(TF_ManualLot(entryTF));
 
    if(isBuy) { if(sl >= entryPrice || tp <= entryPrice) return false; }
    else      { if(sl <= entryPrice || tp >= entryPrice) return false; }
@@ -1457,35 +1739,108 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
    {
       SetLastSig(tf, sigT);
       PlaceOrder(tf, dir);
+      return;
    }
+}
+
+void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
+{
+   if(!IsInTradingTime())
+   {
+      static datetime lastPrintTime2 = 0;
+      if(TimeCurrent() - lastPrintTime2 > 300)
+      {
+         if(InpPrintBlocks) Print("Outside trading hours: ", InpStartHour, ":", InpStartMin, "-", InpEndHour, ":", InpEndMin);
+         lastPrintTime2 = TimeCurrent();
+      }
+      return;
+   }
+
+   if(HasMaxOrdersForTF(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Max orders for ", EnumToString(tf), ": ", CountOrdersPerTF(tf), "/", InpMaxOrdersPerTF);
+      return;
+   }
+
+   if(!IsNewBar(tf)) return;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSig(tf)) return;
+
+   int dir = 0;
+   if(CheckMACDSignal(tf, 1)) dir = 1;
+   else if(CheckMACDSignal(tf, -1)) dir = -1;
+   if(dir == 0) return;
+
+   SetLastSig(tf, sigT);
+   PlaceOrder(tf, dir);
+   return;
+}
+
+bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!g_newBreakoutSignal) return false;
+   if(!TF_UseBreakScan(tf)) return false;
+   if(!IsInTradingTime()) return false;
+   if(HasMaxOrdersForTF(tf)) return false;
+
+   int lookback = TF_BreakScanBars(tf);
+   EMacdScanMode mode = TF_BreakScanMode(tf);
+   if(!HasMACDSignalInLookback(tf, dir, lookback, mode)) return false;
+
+   if(InpPrintSignals)
+      Print("BreakoutScan Entry: ", EnumToString(tf),
+            " mode=", EnumToString(mode),
+            " lookback=", lookback,
+            " dir=", (dir==1?"BUY":"SELL"));
+
+   return PlaceOrder(tf, dir);
 }
 
 //=========================== INIT / TICK ============================
 int OnInit()
 {
+   bool badHandle = false;
+
    trade.SetExpertMagicNumber((int)InpMagic);
+
+   g_useH4  = InpUseH4;
+   g_useH1  = InpUseH1;
+   g_useM30 = InpUseM30;
+   g_useM15 = InpUseM15;
+   g_useM5  = InpUseM5;
+
+   TFButtonsCreate();
+
    if(InpUseATRFilter) g_atrHTF = iATR(_Symbol, InpHTF, InpATRPeriod);
+   if(InpUseATRFilter && g_atrHTF==INVALID_HANDLE) badHandle = true;
    
    // Entry filter handles (EMAFilterPer)
    g_fastH4=iMA(_Symbol,PERIOD_H4,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowH4=iMA(_Symbol,PERIOD_H4,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaH4 =iMA(_Symbol,PERIOD_H4,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastH4==INVALID_HANDLE || g_slowH4==INVALID_HANDLE || g_emaH4==INVALID_HANDLE) badHandle = true;
 
    g_fastH1=iMA(_Symbol,PERIOD_H1,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowH1=iMA(_Symbol,PERIOD_H1,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaH1 =iMA(_Symbol,PERIOD_H1,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastH1==INVALID_HANDLE || g_slowH1==INVALID_HANDLE || g_emaH1==INVALID_HANDLE) badHandle = true;
 
    g_fastM30=iMA(_Symbol,PERIOD_M30,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowM30=iMA(_Symbol,PERIOD_M30,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaM30 =iMA(_Symbol,PERIOD_M30,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastM30==INVALID_HANDLE || g_slowM30==INVALID_HANDLE || g_emaM30==INVALID_HANDLE) badHandle = true;
 
    g_fastM15=iMA(_Symbol,PERIOD_M15,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowM15=iMA(_Symbol,PERIOD_M15,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaM15 =iMA(_Symbol,PERIOD_M15,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastM15==INVALID_HANDLE || g_slowM15==INVALID_HANDLE || g_emaM15==INVALID_HANDLE) badHandle = true;
 
    g_fastM5=iMA(_Symbol,PERIOD_M5,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowM5=iMA(_Symbol,PERIOD_M5,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
    g_emaM5 =iMA(_Symbol,PERIOD_M5,InpEMAFilterPer,0,MODE_EMA,PRICE_CLOSE);
+   if(g_fastM5==INVALID_HANDLE || g_slowM5==INVALID_HANDLE || g_emaM5==INVALID_HANDLE) badHandle = true;
 
    // EMA Exit handles (InpEMAExitPeriod)
    g_exitEmaH4  = iMA(_Symbol, PERIOD_H4,  InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
@@ -1493,6 +1848,8 @@ int OnInit()
    g_exitEmaM30 = iMA(_Symbol, PERIOD_M30, InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_exitEmaM15 = iMA(_Symbol, PERIOD_M15, InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_exitEmaM5  = iMA(_Symbol, PERIOD_M5,  InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_exitEmaH4==INVALID_HANDLE || g_exitEmaH1==INVALID_HANDLE ||
+      g_exitEmaM30==INVALID_HANDLE || g_exitEmaM15==INVALID_HANDLE || g_exitEmaM5==INVALID_HANDLE) badHandle = true;
    
    // EMA Trail SL handles (InpEMATrailPeriod)
    g_trailEmaH4  = iMA(_Symbol, PERIOD_H4,  InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
@@ -1501,9 +1858,27 @@ int OnInit()
    g_trailEmaM15 = iMA(_Symbol, PERIOD_M15, InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_trailEmaM5  = iMA(_Symbol, PERIOD_M5,  InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_trailEmaChart = iMA(_Symbol, (ENUM_TIMEFRAMES)_Period, InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_trailEmaH4==INVALID_HANDLE || g_trailEmaH1==INVALID_HANDLE ||
+      g_trailEmaM30==INVALID_HANDLE || g_trailEmaM15==INVALID_HANDLE ||
+      g_trailEmaM5==INVALID_HANDLE || g_trailEmaChart==INVALID_HANDLE) badHandle = true;
 
-   if(g_fastH4==INVALID_HANDLE || g_fastH1==INVALID_HANDLE ||
-      g_exitEmaH4==INVALID_HANDLE || g_trailEmaH4==INVALID_HANDLE)
+   if(InpShowEAMACDPanel)
+   {
+      g_dbgMacdPanelH = iCustom(_Symbol, InpShowEAMACD_TF, "EA_TV_MACD_View", InpFastEMA, InpSlowEMA, InpSignalSMA);
+      if(g_dbgMacdPanelH==INVALID_HANDLE)
+      {
+         Print("EA MACD panel handle error");
+         badHandle = true;
+      }
+      else
+      {
+         int subw = (int)ChartGetInteger(0, CHART_WINDOWS_TOTAL);
+         if(!ChartIndicatorAdd(0, subw, g_dbgMacdPanelH))
+            Print("EA MACD panel add failed, err=", GetLastError());
+      }
+   }
+
+   if(badHandle)
    {
       Print("Handle error");
       return INIT_FAILED;
@@ -1520,17 +1895,70 @@ void OnTick()
    if(SpreadPts() > InpMaxSpreadPts || IsInNewsWindow()) return;
 
    int dir = UpdateHTFState();
-   if(dir == 0) return;
-   
-   if(InpUseH4)  TryEntryOnTF(PERIOD_H4, dir);
-   if(InpUseH1)  TryEntryOnTF(PERIOD_H1, dir);
-   if(InpUseM30) TryEntryOnTF(PERIOD_M30, dir);
-   if(InpUseM15) TryEntryOnTF(PERIOD_M15, dir);
-   if(InpUseM5)  TryEntryOnTF(PERIOD_M5, dir);
+
+   if(g_useH4)
+   {
+      if(TF_IgnoreDonchian(PERIOD_H4)) TryEntryOnTF_IgnoreDonchian(PERIOD_H4);
+      else if(dir != 0)
+      {
+         if(!TryEntryOnTF_BreakoutScan(PERIOD_H4, dir))
+            TryEntryOnTF(PERIOD_H4, dir);
+      }
+   }
+   if(g_useH1)
+   {
+      if(TF_IgnoreDonchian(PERIOD_H1)) TryEntryOnTF_IgnoreDonchian(PERIOD_H1);
+      else if(dir != 0)
+      {
+         if(!TryEntryOnTF_BreakoutScan(PERIOD_H1, dir))
+            TryEntryOnTF(PERIOD_H1, dir);
+      }
+   }
+   if(g_useM30)
+   {
+      if(TF_IgnoreDonchian(PERIOD_M30)) TryEntryOnTF_IgnoreDonchian(PERIOD_M30);
+      else if(dir != 0)
+      {
+         if(!TryEntryOnTF_BreakoutScan(PERIOD_M30, dir))
+            TryEntryOnTF(PERIOD_M30, dir);
+      }
+   }
+   if(g_useM15)
+   {
+      if(TF_IgnoreDonchian(PERIOD_M15)) TryEntryOnTF_IgnoreDonchian(PERIOD_M15);
+      else if(dir != 0)
+      {
+         if(!TryEntryOnTF_BreakoutScan(PERIOD_M15, dir))
+            TryEntryOnTF(PERIOD_M15, dir);
+      }
+   }
+   if(g_useM5)
+   {
+      if(TF_IgnoreDonchian(PERIOD_M5)) TryEntryOnTF_IgnoreDonchian(PERIOD_M5);
+      else if(dir != 0)
+      {
+         if(!TryEntryOnTF_BreakoutScan(PERIOD_M5, dir))
+            TryEntryOnTF(PERIOD_M5, dir);
+      }
+   }
+}
+
+void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+{
+   if(id == CHARTEVENT_OBJECT_CLICK)
+   {
+      TFButtonTryToggle(sparam);
+   }
 }
 
 void OnDeinit(const int reason)
 {
    TM_DeleteAllObjects();
+   TFButtonsDelete();
+   if(g_dbgMacdPanelH!=INVALID_HANDLE)
+   {
+      IndicatorRelease(g_dbgMacdPanelH);
+      g_dbgMacdPanelH = INVALID_HANDLE;
+   }
 }
 //+------------------------------------------------------------------+
