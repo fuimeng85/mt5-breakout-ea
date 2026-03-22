@@ -74,6 +74,18 @@ input bool          InpM5_UseBreakScan     = false;
 input int           InpM5_BreakScanBars    = 5;
 input EMacdScanMode InpM5_BreakScanMode    = MACD_SCAN_CROSS;
 
+input group "=== 2D) MODE2(BreakScan) Per-TF SL/TP ==="
+input int           InpH4_SLLookbackBars   = 5;
+input int           InpH1_SLLookbackBars   = 5;
+input int           InpM30_SLLookbackBars  = 5;
+input int           InpM15_SLLookbackBars  = 5;
+input int           InpM5_SLLookbackBars   = 5;
+input int           InpH4_Mode2TPValue     = 50000;
+input int           InpH1_Mode2TPValue     = 50000;
+input int           InpM30_Mode2TPValue    = 50000;
+input int           InpM15_Mode2TPValue    = 50000;
+input int           InpM5_Mode2TPValue     = 50000;
+
 input group "=== 3) Filters & Order Management (Per TF) ==="
 input int             InpMaxSpreadPts   = 30;
 input bool            InpUseNewsFilter  = false;
@@ -157,6 +169,12 @@ input int InpH4_TrailStartPts  = 1500;
 input int InpH4_TrailDistPts   = 500;
 input int InpH4_TrailStepPts   = 50;
 
+input group "=== 5D) Per-TF Cooldown After TP (Bars) ==="
+input int InpM5_TPCoolBars  = 0;
+input int InpM15_TPCoolBars = 0;
+input int InpM30_TPCoolBars = 0;
+input int InpH1_TPCoolBars  = 0;
+input int InpH4_TPCoolBars  = 0;
 
 input group "=== 6) Money Management ==="
 input bool            InpUseAutoLot     = false;
@@ -230,6 +248,8 @@ int g_dbgMacdPanelH = INVALID_HANDLE;
 
 datetime g_lastBarH4  = 0, g_lastBarH1  = 0, g_lastBarM30 = 0, g_lastBarM15 = 0, g_lastBarM5  = 0;
 datetime g_lastSigH4  = 0, g_lastSigH1  = 0, g_lastSigM30 = 0, g_lastSigM15 = 0, g_lastSigM5  = 0;
+
+datetime g_lastTPCloseH4=0, g_lastTPCloseH1=0, g_lastTPCloseM30=0, g_lastTPCloseM15=0, g_lastTPCloseM5=0;
 
 bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false;
 
@@ -718,6 +738,16 @@ ENUM_TIMEFRAMES ParseEntryTF(const string comment, ENUM_TIMEFRAMES defTF)
    return defTF;
 }
 
+bool ParseEntryTFStrict(const string comment, ENUM_TIMEFRAMES &tf)
+{
+   if(StringFind(comment, "TF_PERIOD_H4") >= 0)  { tf = PERIOD_H4;  return true; }
+   if(StringFind(comment, "TF_PERIOD_H1") >= 0)  { tf = PERIOD_H1;  return true; }
+   if(StringFind(comment, "TF_PERIOD_M30") >= 0) { tf = PERIOD_M30; return true; }
+   if(StringFind(comment, "TF_PERIOD_M15") >= 0) { tf = PERIOD_M15; return true; }
+   if(StringFind(comment, "TF_PERIOD_M5") >= 0)  { tf = PERIOD_M5;  return true; }
+   return false;
+}
+
 //=========================== PER-TF BB EXIT GETTERS ==================
 bool TF_UseBBExit(ENUM_TIMEFRAMES tf)
 {
@@ -850,12 +880,76 @@ EMacdScanMode TF_BreakScanMode(ENUM_TIMEFRAMES tf)
    return MACD_SCAN_CROSS;
 }
 
+int TF_SLLookbackBars(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_SLLookbackBars;
+   if(tf==PERIOD_H1)  return InpH1_SLLookbackBars;
+   if(tf==PERIOD_M30) return InpM30_SLLookbackBars;
+   if(tf==PERIOD_M15) return InpM15_SLLookbackBars;
+   if(tf==PERIOD_M5)  return InpM5_SLLookbackBars;
+   return 5;
+}
+
+int TF_Mode2TPValue(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_Mode2TPValue;
+   if(tf==PERIOD_H1)  return InpH1_Mode2TPValue;
+   if(tf==PERIOD_M30) return InpM30_Mode2TPValue;
+   if(tf==PERIOD_M15) return InpM15_Mode2TPValue;
+   if(tf==PERIOD_M5)  return InpM5_Mode2TPValue;
+   return InpHardTP;
+}
+
+int TF_TPCoolBars(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_TPCoolBars;
+   if(tf==PERIOD_H1)  return InpH1_TPCoolBars;
+   if(tf==PERIOD_M30) return InpM30_TPCoolBars;
+   if(tf==PERIOD_M15) return InpM15_TPCoolBars;
+   if(tf==PERIOD_M5)  return InpM5_TPCoolBars;
+   return 0;
+}
+
+datetime TF_LastTPCloseTime(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return g_lastTPCloseH4;
+   if(tf==PERIOD_H1)  return g_lastTPCloseH1;
+   if(tf==PERIOD_M30) return g_lastTPCloseM30;
+   if(tf==PERIOD_M15) return g_lastTPCloseM15;
+   if(tf==PERIOD_M5)  return g_lastTPCloseM5;
+   return 0;
+}
+
+void TF_SetLastTPCloseTime(ENUM_TIMEFRAMES tf, datetime t)
+{
+   if(tf==PERIOD_H4)  g_lastTPCloseH4=t;
+   if(tf==PERIOD_H1)  g_lastTPCloseH1=t;
+   if(tf==PERIOD_M30) g_lastTPCloseM30=t;
+   if(tf==PERIOD_M15) g_lastTPCloseM15=t;
+   if(tf==PERIOD_M5)  g_lastTPCloseM5=t;
+}
+
+bool TF_PassTPCooldown(ENUM_TIMEFRAMES tf)
+{
+   int cool=TF_TPCoolBars(tf);
+   if(cool<=0) return true;
+
+   datetime tpT=TF_LastTPCloseTime(tf);
+   if(tpT<=0) return true;
+
+   int sh=iBarShift(_Symbol, tf, tpT, false);
+   if(sh<0) return true;
+
+   return (sh >= cool);
+}
+
 
 // Support old & friendly
 int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
 {
    int count = 0;
    string tfStr = EnumToString(tf);
+   string tfToken = "_TF_" + tfStr;
    string friendlyName = GetTFFriendlyName(tf);
    bool needsH1Guard = (tf == PERIOD_H1);
 
@@ -866,20 +960,22 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
 
       string comment = PositionGetString(POSITION_COMMENT);
 
-      if(StringFind(comment, "TF_" + tfStr) >= 0)
-         count++;
-      else if(StringFind(comment, friendlyName) >= 0)
+      // Primary (strict) path: EA standard comment token
+      if(StringFind(comment, tfToken) >= 0)
       {
-         // legacy fallback: avoid ambiguous 1H/15min overlap in very old comments
-         if(needsH1Guard)
-         {
-            if(StringFind(comment, "15min") < 0) count++;
-         }
-         else
-         {
-            count++;
-         }
+         count++;
+         continue;
       }
+
+      // Legacy fallback: only accept comments shaped like EA orders
+      bool legacyShape = (StringFind(comment, "Buy_") == 0 || StringFind(comment, "Sell_") == 0);
+      if(!legacyShape) continue;
+      if(StringFind(comment, friendlyName) < 0) continue;
+
+      // Ambiguity guard for old 1H/15min style comments
+      if(tf == PERIOD_H1 && StringFind(comment, "15min") >= 0) continue;
+
+      count++;
    }
    return count;
 }
@@ -1327,10 +1423,12 @@ bool CheckMACDSignal(ENUM_TIMEFRAMES tf, int dir)
    ArrayResize(mainLine, BARS);
    for(int i = 0; i < BARS; i++) mainLine[i] = fast[i] - slow[i];
    double signal1 = 0.0, signal2 = 0.0;
-   for(int i = 1; i < 1 + InpSignalSMA && i < BARS; i++) signal1 += mainLine[i];
-   for(int i = 2; i < 2 + InpSignalSMA && i < BARS; i++) signal2 += mainLine[i];
-   signal1 /= InpSignalSMA;
-   signal2 /= InpSignalSMA;
+   int cnt1 = 0, cnt2 = 0;
+   for(int i = 1; i < 1 + InpSignalSMA && i < BARS; i++) { signal1 += mainLine[i]; cnt1++; }
+   for(int i = 2; i < 2 + InpSignalSMA && i < BARS; i++) { signal2 += mainLine[i]; cnt2++; }
+   if(cnt1 <= 0 || cnt2 <= 0) return false;
+   signal1 /= (double)cnt1;
+   signal2 /= (double)cnt2;
 
    double main1 = mainLine[1];
    double hist1 = main1 - signal1;
@@ -1369,10 +1467,12 @@ bool CheckMACDSignalAtShift(ENUM_TIMEFRAMES tf, int dir, int shift, EMacdScanMod
    for(int i=0;i<barsNeed;i++) mainLine[i]=fast[i]-slow[i];
 
    double sigNow=0.0, sigPrev=0.0;
-   for(int i=shift; i<shift+InpSignalSMA && i<barsNeed; i++) sigNow += mainLine[i];
-   for(int i=shift+1; i<shift+1+InpSignalSMA && i<barsNeed; i++) sigPrev += mainLine[i];
-   sigNow  /= InpSignalSMA;
-   sigPrev /= InpSignalSMA;
+   int cntNow=0, cntPrev=0;
+   for(int i=shift; i<shift+InpSignalSMA && i<barsNeed; i++) { sigNow += mainLine[i]; cntNow++; }
+   for(int i=shift+1; i<shift+1+InpSignalSMA && i<barsNeed; i++) { sigPrev += mainLine[i]; cntPrev++; }
+   if(cntNow <= 0 || cntPrev <= 0) return false;
+   sigNow  /= (double)cntNow;
+   sigPrev /= (double)cntPrev;
 
    double mainNow  = mainLine[shift];
    double mainPrev = mainLine[shift+1];
@@ -1405,18 +1505,20 @@ bool HasMACDSignalInLookback(ENUM_TIMEFRAMES tf, int dir, int lookback, EMacdSca
    return false;
 }
 
-double CalculateInitialSL(ENUM_TIMEFRAMES tf, int dir)
+double CalculateInitialSL(ENUM_TIMEFRAMES tf, int dir, int lookbackBars)
 {
+   if(lookbackBars < 1) lookbackBars = 1;
+
    MqlRates rates[]; ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, tf, 1, 5, rates) < 5) return 0.0;
+   if(CopyRates(_Symbol, tf, 1, lookbackBars, rates) < lookbackBars) return 0.0;
 
    if(dir == 1) {
       double lowest = rates[0].low;
-      for(int i = 1; i < 5; i++) if(rates[i].low < lowest) lowest = rates[i].low;
+      for(int i = 1; i < lookbackBars; i++) if(rates[i].low < lowest) lowest = rates[i].low;
       return lowest - InpSLBufferPts * P();
    } else {
       double highest = rates[0].high;
-      for(int i = 1; i < 5; i++) if(rates[i].high > highest) highest = rates[i].high;
+      for(int i = 1; i < lookbackBars; i++) if(rates[i].high > highest) highest = rates[i].high;
       return highest + InpSLBufferPts * P();
    }
 }
@@ -1461,7 +1563,7 @@ void SetLastSig(ENUM_TIMEFRAMES tf, datetime val)
    }
 }
 
-bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
+bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
 {
    if(HasMaxOrdersForTF(entryTF))
    {
@@ -1480,9 +1582,13 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
 
    bool isBuy = (dir == 1);
    double entryPrice = isBuy ? ask : bid;
-   double sl = CalculateInitialSL(entryTF, dir);
+   int slLookback = TF_SLLookbackBars(entryTF);
+   double sl = CalculateInitialSL(entryTF, dir, slLookback);
    if(sl == 0.0) return false;
-   double tp = isBuy ? entryPrice + InpHardTP * P() : entryPrice - InpHardTP * P();
+   int tpPts = InpHardTP;
+   if(isMode2)
+      tpPts = TF_Mode2TPValue(entryTF);
+   double tp = isBuy ? entryPrice + tpPts * P() : entryPrice - tpPts * P();
    double lot = CalcAutoLotByRisk(entryPrice, sl);
    if(TF_UseManualLot(entryTF))
       lot = NormalizeLot(TF_ManualLot(entryTF));
@@ -1492,7 +1598,11 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
 
    string tfFriendly = GetTFFriendlyName(entryTF);
    string tfInternal = EnumToString(entryTF);
-   string comment = (isBuy ? "Buy_" : "Sell_") + tfFriendly + "_TF_" + tfInternal;
+   string comment = "";
+   if(isMode2)
+      comment = "MODE 2 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
+   else
+      comment = (isBuy ? "Buy_" : "Sell_") + tfFriendly + "_TF_" + tfInternal;
 
    bool ok = isBuy ? trade.Buy(lot, _Symbol, entryPrice, sl, tp, comment)
                    : trade.Sell(lot, _Symbol, entryPrice, sl, tp, comment);
@@ -1730,6 +1840,13 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
       return;
    }
 
+   if(!TF_PassTPCooldown(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Blocked by TP cooldown: ", EnumToString(tf), " coolBars=", TF_TPCoolBars(tf));
+      return;
+   }
+
    if(!IsNewBar(tf)) return;
 
    datetime sigT = iTime(_Symbol, tf, 1);
@@ -1739,20 +1856,6 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
    {
       SetLastSig(tf, sigT);
       PlaceOrder(tf, dir);
-      return;
-   }
-}
-
-void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
-{
-   if(!IsInTradingTime())
-   {
-      static datetime lastPrintTime2 = 0;
-      if(TimeCurrent() - lastPrintTime2 > 300)
-      {
-         if(InpPrintBlocks) Print("Outside trading hours: ", InpStartHour, ":", InpStartMin, "-", InpEndHour, ":", InpEndMin);
-         lastPrintTime2 = TimeCurrent();
-      }
       return;
    }
 
@@ -1798,10 +1901,93 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
    return PlaceOrder(tf, dir);
 }
 
+void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
+{
+   if(!IsInTradingTime())
+   {
+      static datetime lastPrintTime2 = 0;
+      if(TimeCurrent() - lastPrintTime2 > 300)
+      {
+         if(InpPrintBlocks) Print("Outside trading hours: ", InpStartHour, ":", InpStartMin, "-", InpEndHour, ":", InpEndMin);
+         lastPrintTime2 = TimeCurrent();
+      }
+      return;
+   }
+
+   if(HasMaxOrdersForTF(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Max orders for ", EnumToString(tf), ": ", CountOrdersPerTF(tf), "/", InpMaxOrdersPerTF);
+      return;
+   }
+
+   if(!TF_PassTPCooldown(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Blocked by TP cooldown: ", EnumToString(tf), " coolBars=", TF_TPCoolBars(tf));
+      return;
+   }
+
+   if(!IsNewBar(tf)) return;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSig(tf)) return;
+
+   int dir = 0;
+   if(CheckMACDSignal(tf, 1)) dir = 1;
+   else if(CheckMACDSignal(tf, -1)) dir = -1;
+   if(dir == 0) return;
+
+   SetLastSig(tf, sigT);
+   PlaceOrder(tf, dir);
+   return;
+}
+
+bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!g_newBreakoutSignal) return false;
+   if(!TF_UseBreakScan(tf)) return false;
+   if(!IsInTradingTime()) return false;
+   if(HasMaxOrdersForTF(tf)) return false;
+   if(!TF_PassTPCooldown(tf)) return false;
+
+   int lookback = TF_BreakScanBars(tf);
+   EMacdScanMode mode = TF_BreakScanMode(tf);
+   if(!HasMACDSignalInLookback(tf, dir, lookback, mode)) return false;
+
+   if(InpPrintSignals)
+      Print("BreakoutScan Entry: ", EnumToString(tf),
+            " mode=", EnumToString(mode),
+            " lookback=", lookback,
+            " dir=", (dir==1?"BUY":"SELL"));
+
+   return PlaceOrder(tf, dir, true);
+}
+
 //=========================== INIT / TICK ============================
 int OnInit()
 {
    bool badHandle = false;
+
+   if(InpSignalSMA < 1)
+   {
+      Print("Invalid InpSignalSMA: ", InpSignalSMA, ", must be >= 1");
+      return INIT_FAILED;
+   }
+
+   if(InpH4_SLLookbackBars < 1 || InpH1_SLLookbackBars < 1 || InpM30_SLLookbackBars < 1 ||
+      InpM15_SLLookbackBars < 1 || InpM5_SLLookbackBars < 1)
+   {
+      Print("Invalid SLLookbackBars: all TF values must be >= 1");
+      return INIT_FAILED;
+   }
+
+   if(InpH4_Mode2TPValue <= 0 || InpH1_Mode2TPValue <= 0 || InpM30_Mode2TPValue <= 0 ||
+      InpM15_Mode2TPValue <= 0 || InpM5_Mode2TPValue <= 0)
+   {
+      Print("Invalid Mode2TPValue: all TF values must be > 0");
+      return INIT_FAILED;
+   }
 
    trade.SetExpertMagicNumber((int)InpMagic);
 
@@ -1867,8 +2053,7 @@ int OnInit()
       g_dbgMacdPanelH = iCustom(_Symbol, InpShowEAMACD_TF, "EA_TV_MACD_View", InpFastEMA, InpSlowEMA, InpSignalSMA);
       if(g_dbgMacdPanelH==INVALID_HANDLE)
       {
-         Print("EA MACD panel handle error");
-         badHandle = true;
+         Print("EA MACD panel disabled: indicator handle error");
       }
       else
       {
@@ -1941,6 +2126,57 @@ void OnTick()
             TryEntryOnTF(PERIOD_M5, dir);
       }
    }
+}
+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest& request,
+                        const MqlTradeResult& result)
+{
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   ulong dealTicket = trans.deal;
+   if(dealTicket==0) return;
+   if(!HistoryDealSelect(dealTicket)) return;
+
+   string sym = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+   if(sym != _Symbol) return;
+
+   long mg = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+   if((ulong)mg != InpMagic) return;
+
+   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT) return;
+
+   long reason = HistoryDealGetInteger(dealTicket, DEAL_REASON);
+   if(reason != DEAL_REASON_TP) return;
+
+   ENUM_TIMEFRAMES tf = (ENUM_TIMEFRAMES)_Period;
+   bool tfFound = false;
+
+   string cmt = HistoryDealGetString(dealTicket, DEAL_COMMENT);
+   tfFound = ParseEntryTFStrict(cmt, tf);
+
+   if(!tfFound)
+   {
+      long posId = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+      if(posId > 0 && HistorySelect(TimeCurrent()-86400*365, TimeCurrent()+60))
+      {
+         int n = HistoryDealsTotal();
+         for(int i=n-1; i>=0; i--)
+         {
+            ulong tk = HistoryDealGetTicket(i);
+            if((long)HistoryDealGetInteger(tk, DEAL_POSITION_ID) != posId) continue;
+            if((long)HistoryDealGetInteger(tk, DEAL_ENTRY) != DEAL_ENTRY_IN) continue;
+            string inCmt = HistoryDealGetString(tk, DEAL_COMMENT);
+            if(ParseEntryTFStrict(inCmt, tf)) { tfFound = true; break; }
+         }
+      }
+   }
+
+   datetime dt = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+   TF_SetLastTPCloseTime(tf, dt);
+
+   if(InpPrintExits)
+      Print("TP Cooldown Start: ", EnumToString(tf), " at ", TimeToString(dt));
 }
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
