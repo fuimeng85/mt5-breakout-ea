@@ -10,7 +10,7 @@
 //| 6) Trade retcode checks + INVALID_STOPS auto-adjust/retry           |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "4.98"
+#property version   "5.00"
 
 #include <Trade/Trade.mqh>
 CTrade trade;
@@ -1702,7 +1702,7 @@ void CheckEMAProfitExit()
       double bufferPrice = InpEMAExitBufferPts * point;
       double priceNow = isBuy ? bid : ask;
       bool exit = false;
-      
+
       if(isBuy) { if(priceNow <= (ema - bufferPrice)) exit = true; }
       else      { if(priceNow >= (ema + bufferPrice)) exit = true; }
 
@@ -1752,7 +1752,7 @@ void ManageTrailingStop()
 
       double profitPts = isBuy ? (bid - openPrice) / point : (openPrice - ask) / point;
       if(profitPts < trailStartPts) continue;
-      
+
       // --- AFTER PROFIT THRESHOLD: EMA as SL
       if(InpUseEMATrailAfterProfit && profitPts >= InpEMAExitProfitPts)
       {
@@ -1781,13 +1781,13 @@ void ManageTrailingStop()
          double stepPrice = trailStepPts * point;
          if(currentSL != 0 && MathAbs(newSL - currentSL) < stepPrice)
             continue;
-         
+
          if(isBuy) { if(currentSL != 0 && newSL <= currentSL) continue; }
          else      { if(currentSL != 0 && newSL >= currentSL) continue; }
 
          if(!TrailAllowModify(ticket, InpTrailMinInterval))
             continue;
-            
+
          SafePositionModify(ticket,isBuy,newSL,currentTP,"TRAIL");
          continue;
       }
@@ -1799,7 +1799,7 @@ void ManageTrailingStop()
       double stepPrice = trailStepPts * point;
       if(currentSL != 0 && MathAbs(newSL - currentSL) < stepPrice)
          continue;
-         
+
       if(isBuy) { if(currentSL != 0 && newSL <= currentSL) continue; }
       else      { if(currentSL != 0 && newSL >= currentSL) continue; }
 
@@ -1850,7 +1850,7 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
 
    datetime sigT = iTime(_Symbol, tf, 1);
    if(sigT <= 0 || sigT == GetLastSig(tf)) return;
-   
+
    if(CheckMACDSignal(tf, dir))
    {
       SetLastSig(tf, sigT);
@@ -1959,7 +1959,7 @@ int OnInit()
 
    if(InpUseATRFilter) g_atrHTF = iATR(_Symbol, InpHTF, InpATRPeriod);
    if(InpUseATRFilter && g_atrHTF==INVALID_HANDLE) badHandle = true;
-   
+
    // Entry filter handles (EMAFilterPer)
    g_fastH4=iMA(_Symbol,PERIOD_H4,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
    g_slowH4=iMA(_Symbol,PERIOD_H4,InpSlowEMA,0,MODE_EMA,PRICE_CLOSE);
@@ -1994,7 +1994,7 @@ int OnInit()
    g_exitEmaM5  = iMA(_Symbol, PERIOD_M5,  InpEMAExitPeriod, 0, MODE_EMA, PRICE_CLOSE);
    if(g_exitEmaH4==INVALID_HANDLE || g_exitEmaH1==INVALID_HANDLE ||
       g_exitEmaM30==INVALID_HANDLE || g_exitEmaM15==INVALID_HANDLE || g_exitEmaM5==INVALID_HANDLE) badHandle = true;
-   
+
    // EMA Trail SL handles (InpEMATrailPeriod)
    g_trailEmaH4  = iMA(_Symbol, PERIOD_H4,  InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
    g_trailEmaH1  = iMA(_Symbol, PERIOD_H1,  InpEMATrailPeriod, 0, MODE_EMA, PRICE_CLOSE);
