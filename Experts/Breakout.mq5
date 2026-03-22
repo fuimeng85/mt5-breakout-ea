@@ -74,6 +74,18 @@ input bool          InpM5_UseBreakScan     = false;
 input int           InpM5_BreakScanBars    = 5;
 input EMacdScanMode InpM5_BreakScanMode    = MACD_SCAN_CROSS;
 
+input group "=== 2D) MODE2(BreakScan) Per-TF SL/TP ==="
+input int           InpH4_SLLookbackBars   = 5;
+input int           InpH1_SLLookbackBars   = 5;
+input int           InpM30_SLLookbackBars  = 5;
+input int           InpM15_SLLookbackBars  = 5;
+input int           InpM5_SLLookbackBars   = 5;
+input int           InpH4_Mode2TPValue     = 50000;
+input int           InpH1_Mode2TPValue     = 50000;
+input int           InpM30_Mode2TPValue    = 50000;
+input int           InpM15_Mode2TPValue    = 50000;
+input int           InpM5_Mode2TPValue     = 50000;
+
 input group "=== 3) Filters & Order Management (Per TF) ==="
 input int             InpMaxSpreadPts   = 30;
 input bool            InpUseNewsFilter  = false;
@@ -868,6 +880,26 @@ EMacdScanMode TF_BreakScanMode(ENUM_TIMEFRAMES tf)
    return MACD_SCAN_CROSS;
 }
 
+int TF_SLLookbackBars(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_SLLookbackBars;
+   if(tf==PERIOD_H1)  return InpH1_SLLookbackBars;
+   if(tf==PERIOD_M30) return InpM30_SLLookbackBars;
+   if(tf==PERIOD_M15) return InpM15_SLLookbackBars;
+   if(tf==PERIOD_M5)  return InpM5_SLLookbackBars;
+   return 5;
+}
+
+int TF_Mode2TPValue(ENUM_TIMEFRAMES tf)
+{
+   if(tf==PERIOD_H4)  return InpH4_Mode2TPValue;
+   if(tf==PERIOD_H1)  return InpH1_Mode2TPValue;
+   if(tf==PERIOD_M30) return InpM30_Mode2TPValue;
+   if(tf==PERIOD_M15) return InpM15_Mode2TPValue;
+   if(tf==PERIOD_M5)  return InpM5_Mode2TPValue;
+   return InpHardTP;
+}
+
 int TF_TPCoolBars(ENUM_TIMEFRAMES tf)
 {
    if(tf==PERIOD_H4)  return InpH4_TPCoolBars;
@@ -1472,18 +1504,20 @@ bool HasMACDSignalInLookback(ENUM_TIMEFRAMES tf, int dir, int lookback, EMacdSca
    return false;
 }
 
-double CalculateInitialSL(ENUM_TIMEFRAMES tf, int dir)
+double CalculateInitialSL(ENUM_TIMEFRAMES tf, int dir, int lookbackBars)
 {
+   if(lookbackBars < 1) lookbackBars = 1;
+
    MqlRates rates[]; ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, tf, 1, 5, rates) < 5) return 0.0;
+   if(CopyRates(_Symbol, tf, 1, lookbackBars, rates) < lookbackBars) return 0.0;
 
    if(dir == 1) {
       double lowest = rates[0].low;
-      for(int i = 1; i < 5; i++) if(rates[i].low < lowest) lowest = rates[i].low;
+      for(int i = 1; i < lookbackBars; i++) if(rates[i].low < lowest) lowest = rates[i].low;
       return lowest - InpSLBufferPts * P();
    } else {
       double highest = rates[0].high;
-      for(int i = 1; i < 5; i++) if(rates[i].high > highest) highest = rates[i].high;
+      for(int i = 1; i < lookbackBars; i++) if(rates[i].high > highest) highest = rates[i].high;
       return highest + InpSLBufferPts * P();
    }
 }
@@ -1528,7 +1562,7 @@ void SetLastSig(ENUM_TIMEFRAMES tf, datetime val)
    }
 }
 
-bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
+bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
 {
    if(HasMaxOrdersForTF(entryTF))
    {
@@ -1547,9 +1581,13 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
 
    bool isBuy = (dir == 1);
    double entryPrice = isBuy ? ask : bid;
-   double sl = CalculateInitialSL(entryTF, dir);
+   int slLookback = TF_SLLookbackBars(entryTF);
+   double sl = CalculateInitialSL(entryTF, dir, slLookback);
    if(sl == 0.0) return false;
-   double tp = isBuy ? entryPrice + InpHardTP * P() : entryPrice - InpHardTP * P();
+   int tpPts = InpHardTP;
+   if(isMode2)
+      tpPts = TF_Mode2TPValue(entryTF);
+   double tp = isBuy ? entryPrice + tpPts * P() : entryPrice - tpPts * P();
    double lot = CalcAutoLotByRisk(entryPrice, sl);
    if(TF_UseManualLot(entryTF))
       lot = NormalizeLot(TF_ManualLot(entryTF));
@@ -1559,7 +1597,11 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir)
 
    string tfFriendly = GetTFFriendlyName(entryTF);
    string tfInternal = EnumToString(entryTF);
-   string comment = (isBuy ? "Buy_" : "Sell_") + tfFriendly + "_TF_" + tfInternal;
+   string comment = "";
+   if(isMode2)
+      comment = "MODE 2 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
+   else
+      comment = (isBuy ? "Buy_" : "Sell_") + tfFriendly + "_TF_" + tfInternal;
 
    bool ok = isBuy ? trade.Buy(lot, _Symbol, entryPrice, sl, tp, comment)
                    : trade.Sell(lot, _Symbol, entryPrice, sl, tp, comment);
@@ -1877,7 +1919,7 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
             " lookback=", lookback,
             " dir=", (dir==1?"BUY":"SELL"));
 
-   return PlaceOrder(tf, dir);
+   return PlaceOrder(tf, dir, true);
 }
 
 //=========================== INIT / TICK ============================
@@ -1888,6 +1930,20 @@ int OnInit()
    if(InpSignalSMA < 1)
    {
       Print("Invalid InpSignalSMA: ", InpSignalSMA, ", must be >= 1");
+      return INIT_FAILED;
+   }
+
+   if(InpH4_SLLookbackBars < 1 || InpH1_SLLookbackBars < 1 || InpM30_SLLookbackBars < 1 ||
+      InpM15_SLLookbackBars < 1 || InpM5_SLLookbackBars < 1)
+   {
+      Print("Invalid SLLookbackBars: all TF values must be >= 1");
+      return INIT_FAILED;
+   }
+
+   if(InpH4_Mode2TPValue <= 0 || InpH1_Mode2TPValue <= 0 || InpM30_Mode2TPValue <= 0 ||
+      InpM15_Mode2TPValue <= 0 || InpM5_Mode2TPValue <= 0)
+   {
+      Print("Invalid Mode2TPValue: all TF values must be > 0");
       return INIT_FAILED;
    }
 
