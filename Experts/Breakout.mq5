@@ -951,6 +951,7 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
    string tfStr = EnumToString(tf);
    string tfToken = "_TF_" + tfStr;
    string friendlyName = GetTFFriendlyName(tf);
+   bool needsH1Guard = (tf == PERIOD_H1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -1857,6 +1858,47 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
       PlaceOrder(tf, dir);
       return;
    }
+
+   if(HasMaxOrdersForTF(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Max orders for ", EnumToString(tf), ": ", CountOrdersPerTF(tf), "/", InpMaxOrdersPerTF);
+      return;
+   }
+
+   if(!IsNewBar(tf)) return;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSig(tf)) return;
+
+   int dir = 0;
+   if(CheckMACDSignal(tf, 1)) dir = 1;
+   else if(CheckMACDSignal(tf, -1)) dir = -1;
+   if(dir == 0) return;
+
+   SetLastSig(tf, sigT);
+   PlaceOrder(tf, dir);
+   return;
+}
+
+bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!g_newBreakoutSignal) return false;
+   if(!TF_UseBreakScan(tf)) return false;
+   if(!IsInTradingTime()) return false;
+   if(HasMaxOrdersForTF(tf)) return false;
+
+   int lookback = TF_BreakScanBars(tf);
+   EMacdScanMode mode = TF_BreakScanMode(tf);
+   if(!HasMACDSignalInLookback(tf, dir, lookback, mode)) return false;
+
+   if(InpPrintSignals)
+      Print("BreakoutScan Entry: ", EnumToString(tf),
+            " mode=", EnumToString(mode),
+            " lookback=", lookback,
+            " dir=", (dir==1?"BUY":"SELL"));
+
+   return PlaceOrder(tf, dir);
 }
 
 void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
