@@ -726,6 +726,16 @@ ENUM_TIMEFRAMES ParseEntryTF(const string comment, ENUM_TIMEFRAMES defTF)
    return defTF;
 }
 
+bool ParseEntryTFStrict(const string comment, ENUM_TIMEFRAMES &tf)
+{
+   if(StringFind(comment, "TF_PERIOD_H4") >= 0)  { tf = PERIOD_H4;  return true; }
+   if(StringFind(comment, "TF_PERIOD_H1") >= 0)  { tf = PERIOD_H1;  return true; }
+   if(StringFind(comment, "TF_PERIOD_M30") >= 0) { tf = PERIOD_M30; return true; }
+   if(StringFind(comment, "TF_PERIOD_M15") >= 0) { tf = PERIOD_M15; return true; }
+   if(StringFind(comment, "TF_PERIOD_M5") >= 0)  { tf = PERIOD_M5;  return true; }
+   return false;
+}
+
 //=========================== PER-TF BB EXIT GETTERS ==================
 bool TF_UseBBExit(ENUM_TIMEFRAMES tf)
 {
@@ -1945,8 +1955,7 @@ int OnInit()
       g_dbgMacdPanelH = iCustom(_Symbol, InpShowEAMACD_TF, "EA_TV_MACD_View", InpFastEMA, InpSlowEMA, InpSignalSMA);
       if(g_dbgMacdPanelH==INVALID_HANDLE)
       {
-         Print("EA MACD panel handle error");
-         badHandle = true;
+         Print("EA MACD panel disabled: indicator handle error");
       }
       else
       {
@@ -2042,8 +2051,28 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
    long reason = HistoryDealGetInteger(dealTicket, DEAL_REASON);
    if(reason != DEAL_REASON_TP) return;
 
+   ENUM_TIMEFRAMES tf = (ENUM_TIMEFRAMES)_Period;
+   bool tfFound = false;
+
    string cmt = HistoryDealGetString(dealTicket, DEAL_COMMENT);
-   ENUM_TIMEFRAMES tf = ParseEntryTF(cmt, (ENUM_TIMEFRAMES)_Period);
+   tfFound = ParseEntryTFStrict(cmt, tf);
+
+   if(!tfFound)
+   {
+      long posId = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+      if(posId > 0 && HistorySelect(TimeCurrent()-86400*365, TimeCurrent()+60))
+      {
+         int n = HistoryDealsTotal();
+         for(int i=n-1; i>=0; i--)
+         {
+            ulong tk = HistoryDealGetTicket(i);
+            if((long)HistoryDealGetInteger(tk, DEAL_POSITION_ID) != posId) continue;
+            if((long)HistoryDealGetInteger(tk, DEAL_ENTRY) != DEAL_ENTRY_IN) continue;
+            string inCmt = HistoryDealGetString(tk, DEAL_COMMENT);
+            if(ParseEntryTFStrict(inCmt, tf)) { tfFound = true; break; }
+         }
+      }
+   }
 
    datetime dt = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
    TF_SetLastTPCloseTime(tf, dt);
