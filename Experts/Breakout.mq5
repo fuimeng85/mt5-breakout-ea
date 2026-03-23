@@ -271,6 +271,10 @@ datetime g_lastTPCloseH4=0, g_lastTPCloseH1=0, g_lastTPCloseM30=0, g_lastTPClose
 
 bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false;
 
+datetime g_lastTPCloseH4=0, g_lastTPCloseH1=0, g_lastTPCloseM30=0, g_lastTPCloseM15=0, g_lastTPCloseM5=0;
+
+bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false;
+
 // --- per ticket modify throttle
 #define MAX_TRACK 200
 ulong    g_trkTicket[MAX_TRACK];
@@ -987,6 +991,7 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
    string tfStr = EnumToString(tf);
    string tfToken = "_TF_" + tfStr;
    string friendlyName = GetTFFriendlyName(tf);
+   bool needsH1Guard = (tf == PERIOD_H1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -2181,6 +2186,13 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
       if(InpPrintBlocks && IsNewBar(tf))
          Print("Max orders for ", EnumToString(tf), " mode=MODE1: ",
                CountOrdersPerTF(tf, 1), "/", MaxOrdersPerTFByMode(1));
+      return;
+   }
+
+   if(!TF_PassTPCooldown(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Blocked by TP cooldown: ", EnumToString(tf), " coolBars=", TF_TPCoolBars(tf));
       return;
    }
 
