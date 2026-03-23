@@ -94,6 +94,8 @@ input int             InpNewsAfterMin   = 30;
 input bool            InpFOMCOnly       = true;
 input bool            InpNewsNoPosOnly  = true;
 input int             InpMaxOrdersPerTF = 2;
+input int             InpMaxOrdersPerTF_Mode1 = 2;
+input int             InpMaxOrdersPerTF_Mode2 = 2;
 
 input group "=== 4) TV Style MACD (Custom) ==="
 input int             InpFastEMA        = 12;
@@ -248,6 +250,7 @@ int g_dbgMacdPanelH = INVALID_HANDLE;
 
 datetime g_lastBarH4  = 0, g_lastBarH1  = 0, g_lastBarM30 = 0, g_lastBarM15 = 0, g_lastBarM5  = 0;
 datetime g_lastSigH4  = 0, g_lastSigH1  = 0, g_lastSigM30 = 0, g_lastSigM15 = 0, g_lastSigM5  = 0;
+datetime g_lastSigMode2H4  = 0, g_lastSigMode2H1  = 0, g_lastSigMode2M30 = 0, g_lastSigMode2M15 = 0, g_lastSigMode2M5  = 0;
 
 datetime g_lastTPCloseH4=0, g_lastTPCloseH1=0, g_lastTPCloseM30=0, g_lastTPCloseM15=0, g_lastTPCloseM5=0;
 
@@ -945,7 +948,20 @@ bool TF_PassTPCooldown(ENUM_TIMEFRAMES tf)
 
 
 // Support old & friendly
-int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
+bool IsMode2Comment(const string comment)
+{
+   return (StringFind(comment, "MODE 2 ") == 0);
+}
+
+int MaxOrdersPerTFByMode(const int mode)
+{
+   // mode: 1=MODE1, 2=MODE2, else fallback to legacy limit
+   if(mode == 1) return MathMax(0, InpMaxOrdersPerTF_Mode1);
+   if(mode == 2) return MathMax(0, InpMaxOrdersPerTF_Mode2);
+   return MathMax(0, InpMaxOrdersPerTF);
+}
+
+int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
 {
    int count = 0;
    string tfStr = EnumToString(tf);
@@ -958,6 +974,10 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
       if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
 
       string comment = PositionGetString(POSITION_COMMENT);
+      bool isMode2 = IsMode2Comment(comment);
+
+      if(mode == 1 && isMode2)  continue;
+      if(mode == 2 && !isMode2) continue;
 
       // Primary (strict) path: EA standard comment token
       if(StringFind(comment, tfToken) >= 0)
@@ -969,6 +989,7 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
       // Legacy fallback: only accept comments shaped like EA orders
       bool legacyShape = (StringFind(comment, "Buy_") == 0 || StringFind(comment, "Sell_") == 0);
       if(!legacyShape) continue;
+      if(mode == 2) continue; // legacy comments are MODE1 only
       if(StringFind(comment, friendlyName) < 0) continue;
 
       // Ambiguity guard for old 1H/15min style comments
@@ -979,9 +1000,9 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf)
    return count;
 }
 
-bool HasMaxOrdersForTF(ENUM_TIMEFRAMES tf)
+bool HasMaxOrdersForTF(ENUM_TIMEFRAMES tf, int mode=0)
 {
-   return CountOrdersPerTF(tf) >= InpMaxOrdersPerTF;
+   return CountOrdersPerTF(tf, mode) >= MaxOrdersPerTFByMode(mode);
 }
 
 bool HasAnyPosition()
@@ -1562,11 +1583,40 @@ void SetLastSig(ENUM_TIMEFRAMES tf, datetime val)
    }
 }
 
+datetime GetLastSigMode2(ENUM_TIMEFRAMES tf)
+{
+   switch(tf)
+   {
+      case PERIOD_H4:  return g_lastSigMode2H4;
+      case PERIOD_H1:  return g_lastSigMode2H1;
+      case PERIOD_M30: return g_lastSigMode2M30;
+      case PERIOD_M15: return g_lastSigMode2M15;
+      case PERIOD_M5:  return g_lastSigMode2M5;
+      default: return 0;
+   }
+}
+
+void SetLastSigMode2(ENUM_TIMEFRAMES tf, datetime val)
+{
+   switch(tf)
+   {
+      case PERIOD_H4:  g_lastSigMode2H4 = val; break;
+      case PERIOD_H1:  g_lastSigMode2H1 = val; break;
+      case PERIOD_M30: g_lastSigMode2M30 = val; break;
+      case PERIOD_M15: g_lastSigMode2M15 = val; break;
+      case PERIOD_M5:  g_lastSigMode2M5 = val; break;
+   }
+}
+
 bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
 {
-   if(HasMaxOrdersForTF(entryTF))
+   int mode = isMode2 ? 2 : 1;
+   if(HasMaxOrdersForTF(entryTF, mode))
    {
-      if(InpPrintBlocks) Print("Max orders for ", EnumToString(entryTF), ": ", CountOrdersPerTF(entryTF), "/", InpMaxOrdersPerTF);
+      if(InpPrintBlocks)
+         Print("Max orders for ", EnumToString(entryTF),
+               " mode=", (isMode2 ? "MODE2" : "MODE1"),
+               ": ", CountOrdersPerTF(entryTF, mode), "/", MaxOrdersPerTFByMode(mode));
       return false;
    }
 
@@ -1832,10 +1882,11 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
       return;
    }
 
-   if(HasMaxOrdersForTF(tf))
+   if(HasMaxOrdersForTF(tf, 1))
    {
       if(InpPrintBlocks && IsNewBar(tf))
-         Print("Max orders for ", EnumToString(tf), ": ", CountOrdersPerTF(tf), "/", InpMaxOrdersPerTF);
+         Print("Max orders for ", EnumToString(tf), " mode=MODE1: ",
+               CountOrdersPerTF(tf, 1), "/", MaxOrdersPerTFByMode(1));
       return;
    }
 
@@ -1872,10 +1923,11 @@ void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
       return;
    }
 
-   if(HasMaxOrdersForTF(tf))
+   if(HasMaxOrdersForTF(tf, 1))
    {
       if(InpPrintBlocks && IsNewBar(tf))
-         Print("Max orders for ", EnumToString(tf), ": ", CountOrdersPerTF(tf), "/", InpMaxOrdersPerTF);
+         Print("Max orders for ", EnumToString(tf), " mode=MODE1: ",
+               CountOrdersPerTF(tf, 1), "/", MaxOrdersPerTFByMode(1));
       return;
    }
 
@@ -1906,12 +1958,17 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
    if(!g_newBreakoutSignal) return false;
    if(!TF_UseBreakScan(tf)) return false;
    if(!IsInTradingTime()) return false;
-   if(HasMaxOrdersForTF(tf)) return false;
+   if(HasMaxOrdersForTF(tf, 2)) return false;
    if(!TF_PassTPCooldown(tf)) return false;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSigMode2(tf)) return false;
 
    int lookback = TF_BreakScanBars(tf);
    EMacdScanMode mode = TF_BreakScanMode(tf);
    if(!HasMACDSignalInLookback(tf, dir, lookback, mode)) return false;
+
+   SetLastSigMode2(tf, sigT);
 
    if(InpPrintSignals)
       Print("BreakoutScan Entry: ", EnumToString(tf),
@@ -1944,6 +2001,12 @@ int OnInit()
       InpM15_Mode2TPValue <= 0 || InpM5_Mode2TPValue <= 0)
    {
       Print("Invalid Mode2TPValue: all TF values must be > 0");
+      return INIT_FAILED;
+   }
+
+   if(InpMaxOrdersPerTF_Mode1 < 0 || InpMaxOrdersPerTF_Mode2 < 0)
+   {
+      Print("Invalid max-orders: Mode1/Mode2 limits must be >= 0");
       return INIT_FAILED;
    }
 
@@ -2129,6 +2192,8 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
          }
       }
    }
+
+   if(!tfFound) return;
 
    datetime dt = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
    TF_SetLastTPCloseTime(tf, dt);
