@@ -1762,6 +1762,14 @@ bool HasMode3DirectionPosition(ENUM_TIMEFRAMES tf, int dir)
    return false;
 }
 
+double CalcMode1Mode2Lot(ENUM_TIMEFRAMES entryTF, double entryPrice, double sl)
+{
+   double lot = CalcAutoLotByRisk(entryPrice, sl);
+   if(TF_UseManualLot(entryTF))
+      lot = NormalizeLot(TF_ManualLot(entryTF));
+   return lot;
+}
+
 bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
 {
    int mode = isMode2 ? 2 : 1;
@@ -1792,9 +1800,7 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
    if(isMode2)
       tpPts = TF_Mode2TPValue(entryTF);
    double tp = isBuy ? entryPrice + tpPts * P() : entryPrice - tpPts * P();
-   double lot = CalcAutoLotByRisk(entryPrice, sl);
-   if(TF_UseManualLot(entryTF))
-      lot = NormalizeLot(TF_ManualLot(entryTF));
+   double lot = CalcMode1Mode2Lot(entryTF, entryPrice, sl);
 
    if(isBuy) { if(sl >= entryPrice || tp <= entryPrice) return false; }
    else      { if(sl <= entryPrice || tp >= entryPrice) return false; }
@@ -2163,6 +2169,25 @@ void TryEntryOnTF_Mode3(ENUM_TIMEFRAMES tf, int dir)
    PlaceOrderMode3(tf, dir);
 }
 
+void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(TF_IgnoreDonchian(tf))
+   {
+      TryEntryOnTF_IgnoreDonchian(tf);
+      return;
+   }
+
+   if(dir == 0) return;
+
+   if(!TryEntryOnTF_BreakoutScan(tf, dir))
+      TryEntryOnTF(tf, dir);
+}
+
+void ProcessTFEntry_Mode3(ENUM_TIMEFRAMES tf, int dir)
+{
+   TryEntryOnTF_Mode3(tf, dir);
+}
+
 void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
 {
    if(!IsInTradingTime())
@@ -2418,55 +2443,13 @@ void OnTick()
       }
    }
 
-   if(g_useH4)
+   ENUM_TIMEFRAMES tfs[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
+   bool enabled[5] = {g_useH4, g_useH1, g_useM30, g_useM15, g_useM5};
+   for(int i=0; i<5; i++)
    {
-      if(TF_IgnoreDonchian(PERIOD_H4)) TryEntryOnTF_IgnoreDonchian(PERIOD_H4);
-      else if(dir != 0)
-      {
-         if(!TryEntryOnTF_BreakoutScan(PERIOD_H4, dir))
-            TryEntryOnTF(PERIOD_H4, dir);
-      }
-      TryEntryOnTF_Mode3(PERIOD_H4, dir);
-   }
-   if(g_useH1)
-   {
-      if(TF_IgnoreDonchian(PERIOD_H1)) TryEntryOnTF_IgnoreDonchian(PERIOD_H1);
-      else if(dir != 0)
-      {
-         if(!TryEntryOnTF_BreakoutScan(PERIOD_H1, dir))
-            TryEntryOnTF(PERIOD_H1, dir);
-      }
-      TryEntryOnTF_Mode3(PERIOD_H1, dir);
-   }
-   if(g_useM30)
-   {
-      if(TF_IgnoreDonchian(PERIOD_M30)) TryEntryOnTF_IgnoreDonchian(PERIOD_M30);
-      else if(dir != 0)
-      {
-         if(!TryEntryOnTF_BreakoutScan(PERIOD_M30, dir))
-            TryEntryOnTF(PERIOD_M30, dir);
-      }
-      TryEntryOnTF_Mode3(PERIOD_M30, dir);
-   }
-   if(g_useM15)
-   {
-      if(TF_IgnoreDonchian(PERIOD_M15)) TryEntryOnTF_IgnoreDonchian(PERIOD_M15);
-      else if(dir != 0)
-      {
-         if(!TryEntryOnTF_BreakoutScan(PERIOD_M15, dir))
-            TryEntryOnTF(PERIOD_M15, dir);
-      }
-      TryEntryOnTF_Mode3(PERIOD_M15, dir);
-   }
-   if(g_useM5)
-   {
-      if(TF_IgnoreDonchian(PERIOD_M5)) TryEntryOnTF_IgnoreDonchian(PERIOD_M5);
-      else if(dir != 0)
-      {
-         if(!TryEntryOnTF_BreakoutScan(PERIOD_M5, dir))
-            TryEntryOnTF(PERIOD_M5, dir);
-      }
-      TryEntryOnTF_Mode3(PERIOD_M5, dir);
+      if(!enabled[i]) continue;
+      ProcessTFEntry_Mode1Mode2(tfs[i], dir);
+      ProcessTFEntry_Mode3(tfs[i], dir);
    }
 }
 
