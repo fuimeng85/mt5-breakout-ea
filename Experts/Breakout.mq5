@@ -987,6 +987,7 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
    string tfStr = EnumToString(tf);
    string tfToken = "_TF_" + tfStr;
    string friendlyName = GetTFFriendlyName(tf);
+   bool needsH1Guard = (tf == PERIOD_H1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
