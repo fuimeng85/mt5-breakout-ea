@@ -1893,7 +1893,7 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
    if(isMode2)
       comment = "MODE 2 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
    else
-      comment = (isBuy ? "Buy_" : "Sell_") + tfFriendly + "_TF_" + tfInternal;
+      comment = "MODE 1 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
 
    bool ok = isBuy ? trade.Buy(lot, _Symbol, entryPrice, sl, tp, comment)
                    : trade.Sell(lot, _Symbol, entryPrice, sl, tp, comment);
@@ -2290,7 +2290,7 @@ void ManageRiskFreePartialTP()
       }
 
       if(InpPrintExits)
-         Print("RSI Partial TP -> RiskFree: ticket=", ticket,
+         Print("TP half done -> RiskFree: ticket=", ticket,
                " closeVol=", DoubleToString(closeVol,2),
                " entryTF=", EnumToString(entryTF),
                " modeComment=", comment);

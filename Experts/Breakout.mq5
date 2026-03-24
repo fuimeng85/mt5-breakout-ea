@@ -1894,7 +1894,7 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
    if(isMode2)
       comment = "MODE 2 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
    else
-      comment = (isBuy ? "Buy_" : "Sell_") + tfFriendly + "_TF_" + tfInternal;
+      comment = "MODE 1 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
 
    bool ok = isBuy ? trade.Buy(lot, _Symbol, entryPrice, sl, tp, comment)
                    : trade.Sell(lot, _Symbol, entryPrice, sl, tp, comment);
@@ -1905,6 +1905,50 @@ bool PlaceOrder(ENUM_TIMEFRAMES entryTF, int dir, bool isMode2=false)
 }
 
 bool PlaceOrderMode3(ENUM_TIMEFRAMES entryTF, int dir)
+{
+   if(HasMode3DirectionPosition(entryTF, dir))
+   {
+      if(InpPrintBlocks)
+         Print("MODE3 blocked (same direction exists): ", EnumToString(entryTF), " dir=", (dir==1?"BUY":"SELL"));
+      return false;
+   }
+
+   if(SpreadPts() > InpMaxSpreadPts || IsInNewsWindow()) return false;
+
+   trade.SetExpertMagicNumber((int)InpMagic);
+   trade.SetDeviationInPoints(20);
+
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(ask <= 0 || bid <= 0) return false;
+
+   bool isBuy = (dir == 1);
+   double entryPrice = isBuy ? ask : bid;
+   int slLookback = TF_SLLookbackBars(entryTF);
+   double sl = CalculateInitialSL(entryTF, dir, slLookback);
+   if(sl == 0.0) return false;
+   double tp = 0.0; // MODE3: exit by MACD fade/BE/trailing
+   double lot = CalcMode3LotByRisk(entryPrice, sl);
+
+   if(isBuy && sl >= entryPrice) return false;
+   if(!isBuy && sl <= entryPrice) return false;
+
+   string tfFriendly = GetTFFriendlyName(entryTF);
+   string tfInternal = EnumToString(entryTF);
+   string comment = "MODE 3 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
+
+   bool ok = isBuy ? trade.Buy(lot, _Symbol, entryPrice, sl, tp, comment)
+                   : trade.Sell(lot, _Symbol, entryPrice, sl, tp, comment);
+   if(ok && InpPrintSignals)
+      Print("Order MODE3: ", comment, " Lot=", lot);
+
+   return ok;
+}
+
+//=========================== EXIT MANAGEMENT ========================
+
+// Priority: BB Exit BEFORE EMA Profit Exit / Trailing
+void CheckBBExit()
 {
    if(HasMode3DirectionPosition(entryTF, dir))
    {
@@ -2291,7 +2335,7 @@ void ManageRiskFreePartialTP()
       }
 
       if(InpPrintExits)
-         Print("RSI Partial TP -> RiskFree: ticket=", ticket,
+         Print("TP half done -> RiskFree: ticket=", ticket,
                " closeVol=", DoubleToString(closeVol,2),
                " entryTF=", EnumToString(entryTF),
                " modeComment=", comment);
@@ -2394,6 +2438,75 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
    {
       SetLastSig(tf, sigT);
       PlaceOrder(tf, dir);
+      return;
+   }
+
+   if(!IsNewBar(tf)) return;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSig(tf)) return;
+
+   int dir = 0;
+   if(CheckMACDSignal(tf, 1)) dir = 1;
+   else if(CheckMACDSignal(tf, -1)) dir = -1;
+   if(dir == 0) return;
+
+   SetLastSig(tf, sigT);
+   PlaceOrder(tf, dir);
+   return;
+}
+
+bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!g_newBreakoutSignal) return false;
+   if(!TF_UseBreakScan(tf)) return false;
+   if(!IsInTradingTime()) return false;
+   if(HasMaxOrdersForTF(tf, 2)) return false;
+   if(!TF_PassTPCooldown(tf)) return false;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSigMode2(tf)) return false;
+
+   int lookback = TF_BreakScanBars(tf);
+   EMacdScanMode mode = TF_BreakScanMode(tf);
+   if(!HasMACDSignalInLookback(tf, dir, lookback, mode)) return false;
+
+   SetLastSigMode2(tf, sigT);
+
+   if(InpPrintSignals)
+      Print("BreakoutScan Entry: ", EnumToString(tf),
+            " mode=", EnumToString(mode),
+            " lookback=", lookback,
+            " dir=", (dir==1?"BUY":"SELL"));
+
+   return PlaceOrder(tf, dir, true);
+}
+
+void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
+{
+   if(!IsInTradingTime())
+   {
+      static datetime lastPrintTime2 = 0;
+      if(TimeCurrent() - lastPrintTime2 > 300)
+      {
+         if(InpPrintBlocks) Print("Outside trading hours: ", InpStartHour, ":", InpStartMin, "-", InpEndHour, ":", InpEndMin);
+         lastPrintTime2 = TimeCurrent();
+      }
+      return;
+   }
+
+   if(HasMaxOrdersForTF(tf, 1))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Max orders for ", EnumToString(tf), " mode=MODE1: ",
+               CountOrdersPerTF(tf, 1), "/", MaxOrdersPerTFByMode(1));
+      return;
+   }
+
+   if(!TF_PassTPCooldown(tf))
+   {
+      if(InpPrintBlocks && IsNewBar(tf))
+         Print("Blocked by TP cooldown: ", EnumToString(tf), " coolBars=", TF_TPCoolBars(tf));
       return;
    }
 
