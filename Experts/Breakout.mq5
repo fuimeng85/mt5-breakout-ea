@@ -227,6 +227,15 @@ input ENUM_TIMEFRAMES InpShowEAMACD_TF   = PERIOD_H1;
 input group "=== 8C) UI: TF Toggle Buttons ==="
 input bool            InpShowTFButtons   = true;
 
+input group "=== 9) Risk-Free Partial TP (MODE1/2/3) ==="
+input bool            InpUseRSIPartialTP      = false;
+input int             InpRSIPeriod            = 14;
+input double          InpRSIOverbought        = 80.0;
+input double          InpRSIOversold          = 20.0;
+input double          InpPartialClosePercent  = 50.0;
+input int             InpRiskFreeBEBufferPts  = 0;
+input bool            InpIgnoreRiskFreeForMax = true;
+
 //============================== ENUMS ===============================
 enum EDir { DIR_NONE=0, DIR_BUY=1, DIR_SELL=-1 };
 
@@ -276,6 +285,10 @@ bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false
 ulong    g_trkTicket[MAX_TRACK];
 datetime g_trkLastMod[MAX_TRACK];
 
+#define MAX_RF_TRACK 400
+ulong g_rfTicket[MAX_RF_TRACK];
+bool  g_rfEnabled[MAX_RF_TRACK];
+
 int FindTrackIndex(ulong ticket)
 {
    for(int k=0;k<MAX_TRACK;k++)
@@ -310,6 +323,58 @@ bool TrailAllowModify(ulong ticket,int minIntervalSec)
    if((now - g_trkLastMod[idx]) < minIntervalSec) return false;
    g_trkLastMod[idx]=now;
    return true;
+}
+
+int FindRiskFreeIndex(ulong ticket)
+{
+   for(int k=0;k<MAX_RF_TRACK;k++)
+      if(g_rfTicket[k]==ticket) return k;
+   return -1;
+}
+
+int AllocRiskFreeIndex(ulong ticket)
+{
+   int empty=-1;
+   for(int k=0;k<MAX_RF_TRACK;k++)
+   {
+      if(g_rfTicket[k]==ticket) return k;
+      if(g_rfTicket[k]==0 && empty==-1) empty=k;
+   }
+   if(empty!=-1)
+   {
+      g_rfTicket[empty]=ticket;
+      g_rfEnabled[empty]=false;
+      return empty;
+   }
+   return -1;
+}
+
+void MarkRiskFree(ulong ticket, bool enabled=true)
+{
+   int idx=FindRiskFreeIndex(ticket);
+   if(idx<0) idx=AllocRiskFreeIndex(ticket);
+   if(idx>=0) g_rfEnabled[idx]=enabled;
+}
+
+bool IsRiskFreeTicket(ulong ticket)
+{
+   int idx=FindRiskFreeIndex(ticket);
+   if(idx<0) return false;
+   return g_rfEnabled[idx];
+}
+
+void RiskFreeCleanupTable()
+{
+   for(int k=0;k<MAX_RF_TRACK;k++)
+   {
+      ulong tk=g_rfTicket[k];
+      if(tk==0) continue;
+      if(!PositionSelectByTicket(tk))
+      {
+         g_rfTicket[k]=0;
+         g_rfEnabled[k]=false;
+      }
+   }
 }
 
 
@@ -424,6 +489,19 @@ bool SafePositionClose(ulong ticket,const string tag)
    uint rc=trade.ResultRetcode();
    string desc=trade.ResultRetcodeDescription();
    Print("PositionClose FAILED [",tag,"] ticket=",ticket," rc=",rc," ",desc);
+   return false;
+}
+
+bool SafePositionClosePartial(ulong ticket,double closeVolume,const string tag)
+{
+   bool ok=trade.PositionClosePartial(ticket, closeVolume);
+   if(ok) return true;
+
+   uint rc=trade.ResultRetcode();
+   string desc=trade.ResultRetcodeDescription();
+   Print("PositionClosePartial FAILED [",tag,"] ticket=",ticket,
+         " closeVol=",DoubleToString(closeVolume,2),
+         " rc=",rc," ",desc);
    return false;
 }
 
@@ -993,6 +1071,8 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
    {
       if(PositionGetSymbol(i) != _Symbol) continue;
       if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
+      if(InpIgnoreRiskFreeForMax && IsRiskFreeTicket(ticket)) continue;
 
       string comment = PositionGetString(POSITION_COMMENT);
       bool isMode2 = IsMode2Comment(comment);
@@ -1753,6 +1833,8 @@ bool HasMode3DirectionPosition(ENUM_TIMEFRAMES tf, int dir)
    {
       if(PositionGetSymbol(i) != _Symbol) continue;
       if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
+      if(InpIgnoreRiskFreeForMax && IsRiskFreeTicket(ticket)) continue;
 
       string comment = PositionGetString(POSITION_COMMENT);
       if(!IsMode3Comment(comment)) continue;
@@ -2132,9 +2214,95 @@ void ManageMode3Positions()
    }
 }
 
+bool CheckRSIPartialTrigger(ENUM_TIMEFRAMES tf, bool isBuy)
+{
+   int h=iRSI(_Symbol, tf, InpRSIPeriod, PRICE_CLOSE);
+   if(h==INVALID_HANDLE) return false;
+
+   double rsi[];
+   ArraySetAsSeries(rsi, true);
+   bool ok = (CopyBuffer(h, 0, 1, 1, rsi) == 1);
+   IndicatorRelease(h);
+   if(!ok) return false;
+
+   if(isBuy) return (rsi[0] >= InpRSIOverbought);
+   return (rsi[0] <= InpRSIOversold);
+}
+
+double CalcPartialCloseVolume(double currentVolume)
+{
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(minLot <= 0 || step <= 0) return 0.0;
+
+   double closeVol = currentVolume * (InpPartialClosePercent / 100.0);
+   closeVol = MathFloor(closeVol / step) * step;
+   closeVol = NormalizeDouble(closeVol, 2);
+
+   if(closeVol < minLot) closeVol = minLot;
+   double remain = currentVolume - closeVol;
+   remain = NormalizeDouble(remain, 2);
+   if(remain < minLot) return 0.0;
+   return closeVol;
+}
+
+void ManageRiskFreePartialTP()
+{
+   if(!InpUseRSIPartialTP) return;
+   if(InpRSIPeriod < 2 || InpPartialClosePercent <= 0.0 || InpPartialClosePercent >= 100.0) return;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetSymbol(i) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+
+      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
+      if(IsRiskFreeTicket(ticket)) continue;
+
+      long type = PositionGetInteger(POSITION_TYPE);
+      bool isBuy = (type == POSITION_TYPE_BUY);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double volume = PositionGetDouble(POSITION_VOLUME);
+      if(volume <= 0.0) continue;
+
+      string comment = PositionGetString(POSITION_COMMENT);
+      ENUM_TIMEFRAMES entryTF = ParseEntryTF(comment, (ENUM_TIMEFRAMES)_Period);
+      if(!CheckRSIPartialTrigger(entryTF, isBuy)) continue;
+
+      double closeVol = CalcPartialCloseVolume(volume);
+      if(closeVol <= 0.0) continue;
+      if(!SafePositionClosePartial(ticket, closeVol, "RSI_PARTIAL")) continue;
+
+      MarkRiskFree(ticket, true);
+
+      double be = openPrice + (isBuy ? InpRiskFreeBEBufferPts*P() : -InpRiskFreeBEBufferPts*P());
+      be = NormalizeDouble(be, _Digits);
+      if(isBuy)
+      {
+         if(currentSL == 0 || be > currentSL)
+            SafePositionModify(ticket, isBuy, be, currentTP, "RF_BE");
+      }
+      else
+      {
+         if(currentSL == 0 || be < currentSL)
+            SafePositionModify(ticket, isBuy, be, currentTP, "RF_BE");
+      }
+
+      if(InpPrintExits)
+         Print("RSI Partial TP -> RiskFree: ticket=", ticket,
+               " closeVol=", DoubleToString(closeVol,2),
+               " entryTF=", EnumToString(entryTF),
+               " modeComment=", comment);
+   }
+}
+
 void ManagePosition()
 {
    TrailCleanupTable(); // v4.98: free closed tickets in throttle table
+   RiskFreeCleanupTable();
+   ManageRiskFreePartialTP();
    CheckBBExit();
    CheckEMAProfitExit();
    ManageTrailingStop();
@@ -2228,6 +2396,46 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
       PlaceOrder(tf, dir);
       return;
    }
+
+   if(!IsNewBar(tf)) return;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSig(tf)) return;
+
+   int dir = 0;
+   if(CheckMACDSignal(tf, 1)) dir = 1;
+   else if(CheckMACDSignal(tf, -1)) dir = -1;
+   if(dir == 0) return;
+
+   SetLastSig(tf, sigT);
+   PlaceOrder(tf, dir);
+   return;
+}
+
+bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!g_newBreakoutSignal) return false;
+   if(!TF_UseBreakScan(tf)) return false;
+   if(!IsInTradingTime()) return false;
+   if(HasMaxOrdersForTF(tf, 2)) return false;
+   if(!TF_PassTPCooldown(tf)) return false;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSigMode2(tf)) return false;
+
+   int lookback = TF_BreakScanBars(tf);
+   EMacdScanMode mode = TF_BreakScanMode(tf);
+   if(!HasMACDSignalInLookback(tf, dir, lookback, mode)) return false;
+
+   SetLastSigMode2(tf, sigT);
+
+   if(InpPrintSignals)
+      Print("BreakoutScan Entry: ", EnumToString(tf),
+            " mode=", EnumToString(mode),
+            " lookback=", lookback,
+            " dir=", (dir==1?"BUY":"SELL"));
+
+   return PlaceOrder(tf, dir, true);
 }
 
 void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
@@ -2335,6 +2543,14 @@ int OnInit()
       InpMode3RiskPercent < 0.0 || InpMode3FixedLot <= 0.0)
    {
       Print("Invalid MODE3 input values");
+      return INIT_FAILED;
+   }
+
+   if(InpRSIPeriod < 2 || InpRSIOverbought <= InpRSIOversold ||
+      InpPartialClosePercent <= 0.0 || InpPartialClosePercent >= 100.0 ||
+      InpRiskFreeBEBufferPts < 0)
+   {
+      Print("Invalid Risk-Free RSI partial TP inputs");
       return INIT_FAILED;
    }
 
