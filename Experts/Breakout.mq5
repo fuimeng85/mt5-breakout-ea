@@ -10,7 +10,7 @@
 //| 6) Trade retcode checks + INVALID_STOPS auto-adjust/retry           |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "4.98"
+#property version   "5.3"
 
 #include <Trade/Trade.mqh>
 CTrade trade;
