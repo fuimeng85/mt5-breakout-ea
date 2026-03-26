@@ -10,7 +10,7 @@
 //| 6) Trade retcode checks + INVALID_STOPS auto-adjust/retry           |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "4.98"
+#property version   "5.00"
 
 #include <Trade/Trade.mqh>
 CTrade trade;
@@ -235,15 +235,6 @@ input double          InpRSIOversold          = 20.0;
 input double          InpPartialClosePercent  = 50.0;
 input int             InpRiskFreeBEBufferPts  = 0;
 input bool            InpIgnoreRiskFreeForMax = true;
-
-input group "=== 9B) Fib TP Extension (MODE2/MODE3) ==="
-input bool            InpUseFibTP_Mode2       = false;
-input bool            InpUseFibTP_Mode3       = false;
-input double          InpFibTP1Ratio          = 1.618;
-input double          InpFibTP2Ratio          = 2.618;
-input double          InpFibTP1ClosePercent   = 50.0;
-input bool            InpFibAfterTP1MoveBE    = true;
-input int             InpFibBEBufferPts       = 0;
 
 //============================== ENUMS ===============================
 enum EDir { DIR_NONE=0, DIR_BUY=1, DIR_SELL=-1 };
@@ -1074,7 +1065,6 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
    string tfStr = EnumToString(tf);
    string tfToken = "_TF_" + tfStr;
    string friendlyName = GetTFFriendlyName(tf);
-   bool needsH1Guard = (tf == PERIOD_H1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -2238,13 +2228,13 @@ bool CheckRSIPartialTrigger(ENUM_TIMEFRAMES tf, bool isBuy)
    return (rsi[0] <= InpRSIOversold);
 }
 
-double CalcPartialCloseVolume(double currentVolume, double closePercent)
+double CalcPartialCloseVolume(double currentVolume)
 {
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(minLot <= 0 || step <= 0) return 0.0;
 
-   double closeVol = currentVolume * (closePercent / 100.0);
+   double closeVol = currentVolume * (InpPartialClosePercent / 100.0);
    closeVol = MathFloor(closeVol / step) * step;
    closeVol = NormalizeDouble(closeVol, 2);
 
@@ -2280,7 +2270,7 @@ void ManageRiskFreePartialTP()
       ENUM_TIMEFRAMES entryTF = ParseEntryTF(comment, (ENUM_TIMEFRAMES)_Period);
       if(!CheckRSIPartialTrigger(entryTF, isBuy)) continue;
 
-      double closeVol = CalcPartialCloseVolume(volume, InpPartialClosePercent);
+      double closeVol = CalcPartialCloseVolume(volume);
       if(closeVol <= 0.0) continue;
       if(!SafePositionClosePartial(ticket, closeVol, "RSI_PARTIAL")) continue;
 
@@ -2307,105 +2297,10 @@ void ManageRiskFreePartialTP()
    }
 }
 
-bool ComputeFibTargetsFromDonchian(bool isBuy, double &tp1, double &tp2)
-{
-   double up=0.0, lo=0.0, close1=0.0;
-   if(!ComputeDonchianHTF(up, lo, close1)) return false;
-   double range = up - lo;
-   if(range <= 0.0) return false;
-   if(InpFibTP1Ratio <= 1.0 || InpFibTP2Ratio <= InpFibTP1Ratio) return false;
-
-   if(isBuy)
-   {
-      tp1 = up + (InpFibTP1Ratio - 1.0) * range;
-      tp2 = up + (InpFibTP2Ratio - 1.0) * range;
-   }
-   else
-   {
-      tp1 = lo - (InpFibTP1Ratio - 1.0) * range;
-      tp2 = lo - (InpFibTP2Ratio - 1.0) * range;
-   }
-   return true;
-}
-
-void ManageFibTPForMode2Mode3()
-{
-   if(!InpUseFibTP_Mode2 && !InpUseFibTP_Mode3) return;
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(PositionGetSymbol(i) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
-
-      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
-      long type = PositionGetInteger(POSITION_TYPE);
-      bool isBuy = (type == POSITION_TYPE_BUY);
-      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      double currentTP = PositionGetDouble(POSITION_TP);
-      double currentSL = PositionGetDouble(POSITION_SL);
-      double volume = PositionGetDouble(POSITION_VOLUME);
-      if(volume <= 0.0) continue;
-
-      string comment = PositionGetString(POSITION_COMMENT);
-      bool isMode2 = IsMode2Comment(comment);
-      bool isMode3 = IsMode3Comment(comment);
-      if(!isMode2 && !isMode3) continue;
-      if(isMode2 && !InpUseFibTP_Mode2) continue;
-      if(isMode3 && !InpUseFibTP_Mode3) continue;
-
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      if(bid <= 0 || ask <= 0) continue;
-      double priceNow = isBuy ? bid : ask;
-
-      double tp1=0.0, tp2=0.0;
-      if(!ComputeFibTargetsFromDonchian(isBuy, tp1, tp2)) continue;
-
-      bool hitTP2 = isBuy ? (priceNow >= tp2) : (priceNow <= tp2);
-      if(hitTP2)
-      {
-         SafePositionClose(ticket, "FIB_TP2");
-         continue;
-      }
-
-      bool hitTP1 = isBuy ? (priceNow >= tp1) : (priceNow <= tp1);
-      if(!hitTP1) continue;
-      if(IsRiskFreeTicket(ticket)) continue;
-
-      double closeVol = CalcPartialCloseVolume(volume, InpFibTP1ClosePercent);
-      if(closeVol <= 0.0) continue;
-      if(!SafePositionClosePartial(ticket, closeVol, "FIB_TP1_HALF")) continue;
-
-      MarkRiskFree(ticket, true);
-      if(InpFibAfterTP1MoveBE)
-      {
-         double be = openPrice + (isBuy ? InpFibBEBufferPts*P() : -InpFibBEBufferPts*P());
-         be = NormalizeDouble(be, _Digits);
-         if(isBuy)
-         {
-            if(currentSL == 0 || be > currentSL)
-               SafePositionModify(ticket, isBuy, be, currentTP, "FIB_BE");
-         }
-         else
-         {
-            if(currentSL == 0 || be < currentSL)
-               SafePositionModify(ticket, isBuy, be, currentTP, "FIB_BE");
-         }
-      }
-
-      if(InpPrintExits)
-         Print("TP half done (FIB TP1): ticket=", ticket,
-               " modeComment=", comment,
-               " TP1=", DoubleToString(tp1,_Digits),
-               " TP2=", DoubleToString(tp2,_Digits));
-   }
-}
-
 void ManagePosition()
 {
    TrailCleanupTable(); // v4.98: free closed tickets in throttle table
    RiskFreeCleanupTable();
-   ManageFibTPForMode2Mode3();
    ManageRiskFreePartialTP();
    CheckBBExit();
    CheckEMAProfitExit();
@@ -2615,14 +2510,6 @@ int OnInit()
       InpRiskFreeBEBufferPts < 0)
    {
       Print("Invalid Risk-Free RSI partial TP inputs");
-      return INIT_FAILED;
-   }
-
-   if(InpFibTP1Ratio <= 1.0 || InpFibTP2Ratio <= InpFibTP1Ratio ||
-      InpFibTP1ClosePercent <= 0.0 || InpFibTP1ClosePercent >= 100.0 ||
-      InpFibBEBufferPts < 0)
-   {
-      Print("Invalid Fib TP inputs");
       return INIT_FAILED;
    }
 
