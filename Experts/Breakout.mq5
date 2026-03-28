@@ -503,13 +503,27 @@ bool SafePositionClose(ulong ticket,const string tag)
 
 bool SafePositionClosePartial(ulong ticket,double closeVolume,const string tag)
 {
-   bool ok=trade.PositionClosePartial(ticket, closeVolume);
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(step <= 0.0) step = 0.01;
+   int vdigits = 0;
+   double t = step;
+   while(vdigits < 8 && MathRound(t) != t)
+   {
+      t *= 10.0;
+      vdigits++;
+   }
+
+   double safeCloseVolume = MathFloor(closeVolume / step) * step;
+   safeCloseVolume = NormalizeDouble(safeCloseVolume, vdigits);
+   if(safeCloseVolume <= 0.0) return false;
+
+   bool ok=trade.PositionClosePartial(ticket, safeCloseVolume);
    if(ok) return true;
 
    uint rc=trade.ResultRetcode();
    string desc=trade.ResultRetcodeDescription();
    Print("PositionClosePartial FAILED [",tag,"] ticket=",ticket,
-         " closeVol=",DoubleToString(closeVolume,2),
+         " closeVol=",DoubleToString(safeCloseVolume,vdigits),
          " rc=",rc," ",desc);
    return false;
 }
@@ -1130,9 +1144,18 @@ double NormalizeLot(double lot)
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(step <= 0.0) step = 0.01;
+   int vdigits = 0;
+   double t = step;
+   while(vdigits < 8 && MathRound(t) != t)
+   {
+      t *= 10.0;
+      vdigits++;
+   }
    if(lot < minLot) lot = minLot;
    if(lot > maxLot) lot = maxLot;
    lot = MathFloor(lot / step) * step;
+   lot = NormalizeDouble(lot, vdigits);
    return MathMax(lot, minLot);
 }
 
@@ -1964,6 +1987,48 @@ void CheckBBExit()
       if(PositionGetSymbol(i) != _Symbol) continue;
       if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
 
+   if(SpreadPts() > InpMaxSpreadPts || IsInNewsWindow()) return false;
+
+   trade.SetExpertMagicNumber((int)InpMagic);
+   trade.SetDeviationInPoints(20);
+
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(ask <= 0 || bid <= 0) return false;
+
+   bool isBuy = (dir == 1);
+   double entryPrice = isBuy ? ask : bid;
+   int slLookback = TF_SLLookbackBars(entryTF);
+   double sl = CalculateInitialSL(entryTF, dir, slLookback);
+   if(sl == 0.0) return false;
+   double tp = 0.0; // MODE3: exit by MACD fade/BE/trailing
+   double lot = CalcMode3LotByRisk(entryPrice, sl);
+
+   if(isBuy && sl >= entryPrice) return false;
+   if(!isBuy && sl <= entryPrice) return false;
+
+   string tfFriendly = GetTFFriendlyName(entryTF);
+   string tfInternal = EnumToString(entryTF);
+   string comment = "MODE 3 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
+
+   bool ok = isBuy ? trade.Buy(lot, _Symbol, entryPrice, sl, tp, comment)
+                   : trade.Sell(lot, _Symbol, entryPrice, sl, tp, comment);
+   if(ok && InpPrintSignals)
+      Print("Order MODE3: ", comment, " Lot=", lot);
+
+   return ok;
+}
+
+//=========================== EXIT MANAGEMENT ========================
+
+// Priority: BB Exit BEFORE EMA Profit Exit / Trailing
+void CheckBBExit()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetSymbol(i) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+
       ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
       long type = PositionGetInteger(POSITION_TYPE);
       bool isBuy = (type == POSITION_TYPE_BUY);
@@ -2243,14 +2308,21 @@ double CalcPartialCloseVolume(double currentVolume, double closePercent)
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(minLot <= 0 || step <= 0) return 0.0;
+   int vdigits = 0;
+   double t = step;
+   while(vdigits < 8 && MathRound(t) != t)
+   {
+      t *= 10.0;
+      vdigits++;
+   }
 
    double closeVol = currentVolume * (closePercent / 100.0);
    closeVol = MathFloor(closeVol / step) * step;
-   closeVol = NormalizeDouble(closeVol, 2);
+   closeVol = NormalizeDouble(closeVol, vdigits);
 
    if(closeVol < minLot) closeVol = minLot;
    double remain = currentVolume - closeVol;
-   remain = NormalizeDouble(remain, 2);
+   remain = NormalizeDouble(remain, vdigits);
    if(remain < minLot) return 0.0;
    return closeVol;
 }
