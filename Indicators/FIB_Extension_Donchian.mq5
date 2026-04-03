@@ -214,7 +214,7 @@ bool GetDonchianBreakout(int &direction, double &a, double &b, const int rates_t
    return false;
 }
 
-void FillLastBarBuffers(const int rates_total, const int direction, const double levels[])
+void FillLastBarBuffers(const int rates_total, const int direction, const double &levels[])
 {
    int i = 0;
    BufL1[i] = levels[0];
