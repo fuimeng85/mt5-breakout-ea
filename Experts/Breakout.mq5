@@ -1137,13 +1137,13 @@ void TrailDashboardCreate()
    if(ObjectFind(0, header) < 0)
    {
       ObjectCreate(0, header, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, header, OBJPROP_CORNER, corner);
-      ObjectSetInteger(0, header, OBJPROP_XDISTANCE, baseX);
-      ObjectSetInteger(0, header, OBJPROP_YDISTANCE, baseY-16);
-      ObjectSetString(0, header, OBJPROP_TEXT, "5C Trail Dashboard (edit + Apply)");
-      ObjectSetInteger(0, header, OBJPROP_COLOR, clrGold);
-      ObjectSetInteger(0, header, OBJPROP_FONTSIZE, 9);
    }
+   ObjectSetInteger(0, header, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, header, OBJPROP_XDISTANCE, baseX);
+   ObjectSetInteger(0, header, OBJPROP_YDISTANCE, baseY-16);
+   ObjectSetString(0, header, OBJPROP_TEXT, "5C Trail Dashboard (edit + Apply)");
+   ObjectSetInteger(0, header, OBJPROP_COLOR, clrGold);
+   ObjectSetInteger(0, header, OBJPROP_FONTSIZE, 9);
 
    for(int i=0;i<5;i++)
    {
@@ -1151,13 +1151,13 @@ void TrailDashboardCreate()
       if(ObjectFind(0, rowLbl) < 0)
       {
          ObjectCreate(0, rowLbl, OBJ_LABEL, 0, 0, 0);
-         ObjectSetInteger(0, rowLbl, OBJPROP_CORNER, corner);
-         ObjectSetInteger(0, rowLbl, OBJPROP_XDISTANCE, baseX);
-         ObjectSetInteger(0, rowLbl, OBJPROP_YDISTANCE, baseY + i*(rowH+gap) + 3);
-         ObjectSetString(0, rowLbl, OBJPROP_TEXT, GetTFFriendlyName(arr[i]));
-         ObjectSetInteger(0, rowLbl, OBJPROP_COLOR, clrWhite);
-         ObjectSetInteger(0, rowLbl, OBJPROP_FONTSIZE, 8);
       }
+      ObjectSetInteger(0, rowLbl, OBJPROP_CORNER, corner);
+      ObjectSetInteger(0, rowLbl, OBJPROP_XDISTANCE, baseX);
+      ObjectSetInteger(0, rowLbl, OBJPROP_YDISTANCE, baseY + i*(rowH+gap) + 3);
+      ObjectSetString(0, rowLbl, OBJPROP_TEXT, GetTFFriendlyName(arr[i]));
+      ObjectSetInteger(0, rowLbl, OBJPROP_COLOR, clrWhite);
+      ObjectSetInteger(0, rowLbl, OBJPROP_FONTSIZE, 8);
 
       for(int j=0;j<3;j++)
       {
@@ -1165,15 +1165,16 @@ void TrailDashboardCreate()
          if(ObjectFind(0, en) < 0)
          {
             ObjectCreate(0, en, OBJ_EDIT, 0, 0, 0);
-            ObjectSetInteger(0, en, OBJPROP_CORNER, corner);
-            ObjectSetInteger(0, en, OBJPROP_XDISTANCE, baseX + 36 + j*(colW+gap));
-            ObjectSetInteger(0, en, OBJPROP_YDISTANCE, baseY + i*(rowH+gap));
-            ObjectSetInteger(0, en, OBJPROP_XSIZE, colW);
-            ObjectSetInteger(0, en, OBJPROP_YSIZE, rowH);
-            ObjectSetInteger(0, en, OBJPROP_FONTSIZE, 8);
-            ObjectSetInteger(0, en, OBJPROP_SELECTABLE, true);
-            ObjectSetInteger(0, en, OBJPROP_READONLY, false);
          }
+         ObjectSetInteger(0, en, OBJPROP_CORNER, corner);
+         ObjectSetInteger(0, en, OBJPROP_XDISTANCE, baseX + 36 + j*(colW+gap));
+         ObjectSetInteger(0, en, OBJPROP_YDISTANCE, baseY + i*(rowH+gap));
+         ObjectSetInteger(0, en, OBJPROP_XSIZE, colW);
+         ObjectSetInteger(0, en, OBJPROP_YSIZE, rowH);
+         ObjectSetInteger(0, en, OBJPROP_FONTSIZE, 8);
+         ObjectSetInteger(0, en, OBJPROP_SELECTABLE, true);
+         ObjectSetInteger(0, en, OBJPROP_HIDDEN, false);
+         ObjectSetInteger(0, en, OBJPROP_READONLY, false);
       }
    }
 
@@ -1181,17 +1182,17 @@ void TrailDashboardCreate()
    if(ObjectFind(0, applyBtn) < 0)
    {
       ObjectCreate(0, applyBtn, OBJ_BUTTON, 0, 0, 0);
-      ObjectSetInteger(0, applyBtn, OBJPROP_CORNER, corner);
-      ObjectSetInteger(0, applyBtn, OBJPROP_XDISTANCE, baseX + 36 + 3*(colW+gap));
-      ObjectSetInteger(0, applyBtn, OBJPROP_YDISTANCE, baseY + 2*(rowH+gap));
-      ObjectSetInteger(0, applyBtn, OBJPROP_XSIZE, 70);
-      ObjectSetInteger(0, applyBtn, OBJPROP_YSIZE, rowH+6);
-      ObjectSetString(0, applyBtn, OBJPROP_TEXT, "Apply 5C");
-      ObjectSetInteger(0, applyBtn, OBJPROP_BGCOLOR, clrLimeGreen);
-      ObjectSetInteger(0, applyBtn, OBJPROP_COLOR, clrBlack);
-      ObjectSetInteger(0, applyBtn, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, applyBtn, OBJPROP_FONTSIZE, 9);
    }
+   ObjectSetInteger(0, applyBtn, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, applyBtn, OBJPROP_XDISTANCE, baseX + 36 + 3*(colW+gap));
+   ObjectSetInteger(0, applyBtn, OBJPROP_YDISTANCE, baseY + 2*(rowH+gap));
+   ObjectSetInteger(0, applyBtn, OBJPROP_XSIZE, 70);
+   ObjectSetInteger(0, applyBtn, OBJPROP_YSIZE, rowH+6);
+   ObjectSetString(0, applyBtn, OBJPROP_TEXT, "Apply 5C");
+   ObjectSetInteger(0, applyBtn, OBJPROP_BGCOLOR, clrLimeGreen);
+   ObjectSetInteger(0, applyBtn, OBJPROP_COLOR, clrBlack);
+   ObjectSetInteger(0, applyBtn, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, applyBtn, OBJPROP_FONTSIZE, 9);
 
    TrailDashboardRefreshUI();
 }
