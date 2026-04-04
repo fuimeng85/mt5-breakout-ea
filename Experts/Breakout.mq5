@@ -1404,6 +1404,21 @@ double CalcMode3LotByRisk(double entryPrice, double slPrice)
    return NormalizeLot(riskMoney / riskPerLot);
 }
 
+double CalcMode3LotByRisk(double entryPrice, double slPrice)
+{
+   if(!InpMode3UseAutoLot) return NormalizeLot(InpMode3FixedLot);
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double riskMoney = equity * (InpMode3RiskPercent / 100.0);
+   double dist = MathAbs(entryPrice - slPrice);
+   if(dist <= 0) dist = 10 * P();
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tickValue <= 0 || tickSize <= 0) return NormalizeLot(InpMode3FixedLot);
+   double riskPerLot = dist * (tickValue / tickSize);
+   if(riskPerLot <= 0) return NormalizeLot(InpMode3FixedLot);
+   return NormalizeLot(riskMoney / riskPerLot);
+}
+
 string ToUpperStr(string s) { StringToUpper(s); return s; }
 
 void TF_SetLastTPCloseTime(ENUM_TIMEFRAMES tf, datetime t)
@@ -2405,10 +2420,12 @@ bool PlaceOrderMode3(ENUM_TIMEFRAMES entryTF, int dir)
 // Priority: BB Exit BEFORE EMA Profit Exit / Trailing
 void CheckBBExit()
 {
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   if(HasMode3DirectionPosition(entryTF, dir))
    {
-      if(PositionGetSymbol(i) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      if(InpPrintBlocks)
+         Print("MODE3 blocked (same direction exists): ", EnumToString(entryTF), " dir=", (dir==1?"BUY":"SELL"));
+      return false;
+   }
 
       ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
       long type = PositionGetInteger(POSITION_TYPE);
@@ -2932,73 +2949,6 @@ void ProcessTFEntry_Mode3(ENUM_TIMEFRAMES tf, int dir)
 
 void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
 {
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(PositionGetSymbol(i) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
-
-      string comment = PositionGetString(POSITION_COMMENT);
-      if(!IsMode3Comment(comment)) continue;
-
-      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
-      long type = PositionGetInteger(POSITION_TYPE);
-      bool isBuy = (type == POSITION_TYPE_BUY);
-      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      double currentSL = PositionGetDouble(POSITION_SL);
-      double currentTP = PositionGetDouble(POSITION_TP);
-      ENUM_TIMEFRAMES entryTF = ParseEntryTF(comment, (ENUM_TIMEFRAMES)_Period);
-
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double point = P();
-      if(bid <= 0 || ask <= 0) continue;
-      double profitPts = isBuy ? (bid - openPrice) / point : (openPrice - ask) / point;
-
-      // 1) MACD weakening fade exit (close-bar confirmed)
-      if(IsMACDWeakeningForTP(entryTF, isBuy, 1))
-      {
-         if(InpPrintExits)
-            Print("MODE3 Fade TP Exit: ", comment, " TF=", EnumToString(entryTF));
-         SafePositionClose(ticket, "MODE3_FADE_TP");
-         continue;
-      }
-
-      // 2) Breakeven + optional trailing after threshold
-      int beStart = InpMode3BreakEvenStartPts;
-      if(beStart <= 0 || profitPts < beStart) continue;
-
-      double beSL = NormalizeDouble(openPrice, _Digits);
-      if(isBuy)
-      {
-         if(currentSL == 0 || beSL > currentSL)
-            SafePositionModify(ticket, isBuy, beSL, currentTP, "MODE3_BE");
-      }
-      else
-      {
-         if(currentSL == 0 || beSL < currentSL)
-            SafePositionModify(ticket, isBuy, beSL, currentTP, "MODE3_BE");
-      }
-
-      if(!InpMode3UseTrail) continue;
-
-      double trailDistPrice = InpMode3TrailDistPts * point;
-      double stepPrice = InpMode3TrailStepPts * point;
-      double newSL = isBuy ? (bid - trailDistPrice) : (ask + trailDistPrice);
-      newSL = NormalizeDouble(newSL, _Digits);
-
-      if(isBuy && newSL >= bid) continue;
-      if(!isBuy && newSL <= ask) continue;
-      if(currentSL != 0 && MathAbs(newSL - currentSL) < stepPrice) continue;
-      if(isBuy && currentSL != 0 && newSL <= currentSL) continue;
-      if(!isBuy && currentSL != 0 && newSL >= currentSL) continue;
-      if(!TrailAllowModify(ticket, InpTrailMinInterval)) continue;
-
-      SafePositionModify(ticket, isBuy, newSL, currentTP, "MODE3_TRAIL");
-   }
-}
-
-bool CheckRSIPartialTrigger(ENUM_TIMEFRAMES tf, bool isBuy)
-{
    int h=iRSI(_Symbol, tf, InpRSIPeriod, PRICE_CLOSE);
    if(h==INVALID_HANDLE) return false;
 
@@ -3025,252 +2975,6 @@ double CalcPartialCloseVolume(double currentVolume, double closePercent)
       vdigits++;
    }
 
-   double closeVol = currentVolume * (closePercent / 100.0);
-   closeVol = MathFloor(closeVol / step) * step;
-   closeVol = NormalizeDouble(closeVol, vdigits);
-
-   if(closeVol < minLot) closeVol = minLot;
-   double remain = currentVolume - closeVol;
-   remain = NormalizeDouble(remain, vdigits);
-   if(remain < minLot) return 0.0;
-   return closeVol;
-}
-
-void ManageRiskFreePartialTP()
-{
-   if(!InpUseRSIPartialTP) return;
-   if(InpRSIPeriod < 2 || InpPartialClosePercent <= 0.0 || InpPartialClosePercent >= 100.0) return;
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(PositionGetSymbol(i) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
-
-      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
-      if(IsRiskFreeTicket(ticket)) continue;
-
-      long type = PositionGetInteger(POSITION_TYPE);
-      bool isBuy = (type == POSITION_TYPE_BUY);
-      double currentTP = PositionGetDouble(POSITION_TP);
-      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      double currentSL = PositionGetDouble(POSITION_SL);
-      double volume = PositionGetDouble(POSITION_VOLUME);
-      if(volume <= 0.0) continue;
-
-      string comment = PositionGetString(POSITION_COMMENT);
-      ENUM_TIMEFRAMES entryTF = ParseEntryTF(comment, (ENUM_TIMEFRAMES)_Period);
-      if(!CheckRSIPartialTrigger(entryTF, isBuy)) continue;
-
-      double closeVol = CalcPartialCloseVolume(volume, InpPartialClosePercent);
-      if(closeVol <= 0.0) continue;
-      if(!SafePositionClosePartial(ticket, closeVol, "RSI_PARTIAL")) continue;
-
-      MarkRiskFree(ticket, true);
-
-      double be = openPrice + (isBuy ? InpRiskFreeBEBufferPts*P() : -InpRiskFreeBEBufferPts*P());
-      be = NormalizeDouble(be, _Digits);
-      if(isBuy)
-      {
-         if(currentSL == 0 || be > currentSL)
-            SafePositionModify(ticket, isBuy, be, currentTP, "RF_BE");
-      }
-      else
-      {
-         if(currentSL == 0 || be < currentSL)
-            SafePositionModify(ticket, isBuy, be, currentTP, "RF_BE");
-      }
-
-      if(InpPrintExits)
-         Print("TP half done -> RiskFree: ticket=", ticket,
-               " closeVol=", DoubleToString(closeVol,2),
-               " entryTF=", EnumToString(entryTF),
-               " modeComment=", comment);
-   }
-}
-
-bool ComputeFibTargetsFromDonchian(bool isBuy, double &tp1, double &tp2)
-{
-   double up=0.0, lo=0.0, close1=0.0;
-   if(!ComputeDonchianHTF(up, lo, close1)) return false;
-   double range = up - lo;
-   if(range <= 0.0) return false;
-   if(InpFibTP1Ratio <= 1.0 || InpFibTP2Ratio <= InpFibTP1Ratio) return false;
-
-   if(isBuy)
-   {
-      tp1 = up + (InpFibTP1Ratio - 1.0) * range;
-      tp2 = up + (InpFibTP2Ratio - 1.0) * range;
-   }
-   else
-   {
-      tp1 = lo - (InpFibTP1Ratio - 1.0) * range;
-      tp2 = lo - (InpFibTP2Ratio - 1.0) * range;
-   }
-   return true;
-}
-
-void ManageFibTPForMode2Mode3()
-{
-   if(!InpUseFibTP_Mode2 && !InpUseFibTP_Mode3) return;
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(PositionGetSymbol(i) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
-
-      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
-      long type = PositionGetInteger(POSITION_TYPE);
-      bool isBuy = (type == POSITION_TYPE_BUY);
-      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      double currentTP = PositionGetDouble(POSITION_TP);
-      double currentSL = PositionGetDouble(POSITION_SL);
-      double volume = PositionGetDouble(POSITION_VOLUME);
-      if(volume <= 0.0) continue;
-
-      string comment = PositionGetString(POSITION_COMMENT);
-      bool isMode2 = IsMode2Comment(comment);
-      bool isMode3 = IsMode3Comment(comment);
-      if(!isMode2 && !isMode3) continue;
-      if(isMode2 && !InpUseFibTP_Mode2) continue;
-      if(isMode3 && !InpUseFibTP_Mode3) continue;
-
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      if(bid <= 0 || ask <= 0) continue;
-      double priceNow = isBuy ? bid : ask;
-
-      double tp1=0.0, tp2=0.0;
-      if(!ComputeFibTargetsFromDonchian(isBuy, tp1, tp2)) continue;
-
-      bool hitTP2 = isBuy ? (priceNow >= tp2) : (priceNow <= tp2);
-      if(hitTP2)
-      {
-         SafePositionClose(ticket, "FIB_TP2");
-         continue;
-      }
-
-      bool hitTP1 = isBuy ? (priceNow >= tp1) : (priceNow <= tp1);
-      if(!hitTP1) continue;
-      if(IsRiskFreeTicket(ticket)) continue;
-
-      double closeVol = CalcPartialCloseVolume(volume, InpFibTP1ClosePercent);
-      if(closeVol <= 0.0) continue;
-      if(!SafePositionClosePartial(ticket, closeVol, "FIB_TP1_HALF")) continue;
-
-      MarkRiskFree(ticket, true);
-      if(InpFibAfterTP1MoveBE)
-      {
-         double be = openPrice + (isBuy ? InpFibBEBufferPts*P() : -InpFibBEBufferPts*P());
-         be = NormalizeDouble(be, _Digits);
-         if(isBuy)
-         {
-            if(currentSL == 0 || be > currentSL)
-               SafePositionModify(ticket, isBuy, be, currentTP, "FIB_BE");
-         }
-         else
-         {
-            if(currentSL == 0 || be < currentSL)
-               SafePositionModify(ticket, isBuy, be, currentTP, "FIB_BE");
-         }
-      }
-
-      if(InpPrintExits)
-         Print("TP half done (FIB TP1): ticket=", ticket,
-               " modeComment=", comment,
-               " TP1=", DoubleToString(tp1,_Digits),
-               " TP2=", DoubleToString(tp2,_Digits));
-   }
-}
-
-void ManagePosition()
-{
-   TrailCleanupTable(); // v4.98: free closed tickets in throttle table
-   RiskFreeCleanupTable();
-   ManageFibTPForMode2Mode3();
-   ManageRiskFreePartialTP();
-   CheckBBExit();
-   CheckEMAProfitExit();
-   ManageTrailingStop();
-   ManageMode3Positions();
-}
-
-//=========================== ENTRY SCAN =============================
-bool Mode3ScanActive(int dir)
-{
-   if(!InpUseMode3) return false;
-   if(!g_mode3Enabled) return false;
-   if(dir == 0) return false;
-   if(g_mode3ScanDir != dir || g_mode3ScanStartHTF <= 0) return false;
-
-   if(InpMode3ScanMaxBarsHTF <= 0) return true;
-   int sh = iBarShift(_Symbol, InpHTF, g_mode3ScanStartHTF, false);
-   if(sh < 0) return true;
-   return (sh <= InpMode3ScanMaxBarsHTF);
-}
-
-void TryEntryOnTF_Mode3(ENUM_TIMEFRAMES tf, int dir)
-{
-   if(!Mode3ScanActive(dir)) return;
-   if(!IsInTradingTime()) return;
-   if(HasMode3DirectionPosition(tf, dir)) return; // one direction one order per TF
-   if(!TF_PassTPCooldown(tf)) return;
-
-   datetime sigT = iTime(_Symbol, tf, 1);
-   if(sigT <= 0 || sigT == GetLastSigMode3(tf)) return;
-   if(!CheckMACDFadeNoEMAAtShift(tf, dir, 1)) return;
-
-   SetLastSigMode3(tf, sigT);
-   PlaceOrderMode3(tf, dir);
-}
-
-void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
-{
-   if(!InpUseMode1 && !TF_UseBreakScan(tf))
-      return;
-
-   if(TF_IgnoreDonchian(tf))
-   {
-      if(InpUseMode1)
-         TryEntryOnTF_IgnoreDonchian(tf);
-      return;
-   }
-
-   if(dir == 0) return;
-
-   bool mode3Active = (InpUseMode3 && Mode3ScanActive(dir));
-   if(mode3Active && InpMode3EntryPriority && !InpAllowMode1WithMode3)
-      return;
-
-   bool useBreakScan = TF_UseBreakScan(tf);
-   if(useBreakScan && g_mode2Enabled)
-   {
-      bool placedMode2 = TryEntryOnTF_BreakoutScan(tf, dir);
-      if(InpBreakScanExclusive || (placedMode2 && !InpAllowMode1WithMode2))
-         return;
-   }
-
-   if(InpUseMode1)
-      TryEntryOnTF(tf, dir);
-}
-
-void ProcessTFEntry_Mode3(ENUM_TIMEFRAMES tf, int dir)
-{
-   TryEntryOnTF_Mode3(tf, dir);
-}
-
-void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
-{
-   if(!IsInTradingTime())
-   {
-      static datetime lastPrintTime = 0;
-      if(TimeCurrent() - lastPrintTime > 300)
-      {
-         if(InpPrintBlocks) Print("Outside trading hours: ", InpStartHour, ":", InpStartMin, "-", InpEndHour, ":", InpEndMin);
-         lastPrintTime = TimeCurrent();
-      }
-      return;
-   }
-
    if(HasMaxOrdersForTF(tf, 1))
    {
       if(InpPrintBlocks && IsNewBar(tf))
@@ -3278,6 +2982,7 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
                CountOrdersPerTF(tf, 1), "/", MaxOrdersPerTFByMode(1));
       return;
    }
+}
 
    if(!TF_PassTPCooldown(tf))
    {
@@ -3364,8 +3069,7 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
    return PlaceOrder(tf, dir, true);
 }
 
-//=========================== INIT / TICK ============================
-int OnInit()
+void ManageFibTPForMode2Mode3()
 {
    bool badHandle = false;
 
@@ -3514,16 +3218,60 @@ int OnInit()
       Print("Handle error");
       return INIT_FAILED;
    }
-
-   Print("Donchian_MACD v4.97 - Per-TF Trailing enabled");
-   return INIT_SUCCEEDED;
 }
 
-void OnTick()
+void ManagePosition()
 {
-   ManagePosition();
+   TrailCleanupTable(); // v4.98: free closed tickets in throttle table
+   RiskFreeCleanupTable();
+   ManageFibTPForMode2Mode3();
+   ManageRiskFreePartialTP();
+   CheckBBExit();
+   CheckEMAProfitExit();
+   ManageTrailingStop();
+   ManageMode3Positions();
+}
 
-   if(SpreadPts() > InpMaxSpreadPts || IsInNewsWindow()) return;
+//=========================== ENTRY SCAN =============================
+bool Mode3ScanActive(int dir)
+{
+   if(!InpUseMode3) return false;
+   if(!g_mode3Enabled) return false;
+   if(dir == 0) return false;
+   if(g_mode3ScanDir != dir || g_mode3ScanStartHTF <= 0) return false;
+
+   if(InpMode3ScanMaxBarsHTF <= 0) return true;
+   int sh = iBarShift(_Symbol, InpHTF, g_mode3ScanStartHTF, false);
+   if(sh < 0) return true;
+   return (sh <= InpMode3ScanMaxBarsHTF);
+}
+
+void TryEntryOnTF_Mode3(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!Mode3ScanActive(dir)) return;
+   if(!IsInTradingTime()) return;
+   if(HasMode3DirectionPosition(tf, dir)) return; // one direction one order per TF
+   if(!TF_PassTPCooldown(tf)) return;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSigMode3(tf)) return;
+   if(!CheckMACDFadeNoEMAAtShift(tf, dir, 1)) return;
+
+   SetLastSigMode3(tf, sigT);
+   PlaceOrderMode3(tf, dir);
+}
+
+void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!InpUseMode1 && !TF_UseBreakScan(tf))
+      return;
+
+   if(TF_IgnoreDonchian(tf))
+   {
+      if(InpUseMode1)
+         TryEntryOnTF_IgnoreDonchian(tf);
+      return;
+   }
 
    if(InpScanOnH1CloseOnly)
    {
@@ -3642,7 +3390,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    g_chartEventBusy = false;
 }
 
-void OnDeinit(const int reason)
+void ProcessTFEntry_Mode3(ENUM_TIMEFRAMES tf, int dir)
 {
    if(InpKeepStateOnParamChange && reason == REASON_PARAMETERS)
       SaveRuntimeState();
