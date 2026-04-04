@@ -10,7 +10,7 @@
 //| 6) Trade retcode checks + INVALID_STOPS auto-adjust/retry           |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "5.3"
+#property version   "4.98"
 
 #include <Trade/Trade.mqh>
 CTrade trade;
@@ -1349,201 +1349,6 @@ bool HasMaxOrdersForTF(ENUM_TIMEFRAMES tf, int mode=0)
    return CountOrdersPerTF(tf, mode) >= MaxOrdersPerTFByMode(mode);
 }
 
-int TF_SLLookbackBars(ENUM_TIMEFRAMES tf)
-{
-   if(tf==PERIOD_H4)  return InpH4_SLLookbackBars;
-   if(tf==PERIOD_H1)  return InpH1_SLLookbackBars;
-   if(tf==PERIOD_M30) return InpM30_SLLookbackBars;
-   if(tf==PERIOD_M15) return InpM15_SLLookbackBars;
-   if(tf==PERIOD_M5)  return InpM5_SLLookbackBars;
-   return 5;
-}
-
-int TF_Mode2TPValue(ENUM_TIMEFRAMES tf)
-{
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   if(step <= 0.0) step = 0.01;
-   int vdigits = 0;
-   double t = step;
-   while(vdigits < 8 && MathRound(t) != t)
-   {
-      t *= 10.0;
-      vdigits++;
-   }
-   if(lot < minLot) lot = minLot;
-   if(lot > maxLot) lot = maxLot;
-   lot = MathFloor(lot / step) * step;
-   lot = NormalizeDouble(lot, vdigits);
-   return MathMax(lot, minLot);
-}
-
-int TF_TPCoolBars(ENUM_TIMEFRAMES tf)
-{
-   if(tf==PERIOD_H4)  return InpH4_TPCoolBars;
-   if(tf==PERIOD_H1)  return InpH1_TPCoolBars;
-   if(tf==PERIOD_M30) return InpM30_TPCoolBars;
-   if(tf==PERIOD_M15) return InpM15_TPCoolBars;
-   if(tf==PERIOD_M5)  return InpM5_TPCoolBars;
-   return 0;
-}
-
-double CalcMode3LotByRisk(double entryPrice, double slPrice)
-{
-   if(!InpMode3UseAutoLot) return NormalizeLot(InpMode3FixedLot);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double riskMoney = equity * (InpMode3RiskPercent / 100.0);
-   double dist = MathAbs(entryPrice - slPrice);
-   if(dist <= 0) dist = 10 * P();
-   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tickValue <= 0 || tickSize <= 0) return NormalizeLot(InpMode3FixedLot);
-   double riskPerLot = dist * (tickValue / tickSize);
-   if(riskPerLot <= 0) return NormalizeLot(InpMode3FixedLot);
-   return NormalizeLot(riskMoney / riskPerLot);
-}
-
-double CalcMode3LotByRisk(double entryPrice, double slPrice)
-{
-   if(!InpMode3UseAutoLot) return NormalizeLot(InpMode3FixedLot);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double riskMoney = equity * (InpMode3RiskPercent / 100.0);
-   double dist = MathAbs(entryPrice - slPrice);
-   if(dist <= 0) dist = 10 * P();
-   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tickValue <= 0 || tickSize <= 0) return NormalizeLot(InpMode3FixedLot);
-   double riskPerLot = dist * (tickValue / tickSize);
-   if(riskPerLot <= 0) return NormalizeLot(InpMode3FixedLot);
-   return NormalizeLot(riskMoney / riskPerLot);
-}
-
-string ToUpperStr(string s) { StringToUpper(s); return s; }
-
-double CalcMode3LotByRisk(double entryPrice, double slPrice)
-{
-   if(!InpMode3UseAutoLot) return NormalizeLot(InpMode3FixedLot);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double riskMoney = equity * (InpMode3RiskPercent / 100.0);
-   double dist = MathAbs(entryPrice - slPrice);
-   if(dist <= 0) dist = 10 * P();
-   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tickValue <= 0 || tickSize <= 0) return NormalizeLot(InpMode3FixedLot);
-   double riskPerLot = dist * (tickValue / tickSize);
-   if(riskPerLot <= 0) return NormalizeLot(InpMode3FixedLot);
-   return NormalizeLot(riskMoney / riskPerLot);
-}
-
-double CalcMode3LotByRisk(double entryPrice, double slPrice)
-{
-   if(!InpMode3UseAutoLot) return NormalizeLot(InpMode3FixedLot);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double riskMoney = equity * (InpMode3RiskPercent / 100.0);
-   double dist = MathAbs(entryPrice - slPrice);
-   if(dist <= 0) dist = 10 * P();
-   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tickValue <= 0 || tickSize <= 0) return NormalizeLot(InpMode3FixedLot);
-   double riskPerLot = dist * (tickValue / tickSize);
-   if(riskPerLot <= 0) return NormalizeLot(InpMode3FixedLot);
-   return NormalizeLot(riskMoney / riskPerLot);
-}
-
-string ToUpperStr(string s) { StringToUpper(s); return s; }
-
-void TF_SetLastTPCloseTime(ENUM_TIMEFRAMES tf, datetime t)
-{
-   if(tf==PERIOD_H4)  g_lastTPCloseH4=t;
-   if(tf==PERIOD_H1)  g_lastTPCloseH1=t;
-   if(tf==PERIOD_M30) g_lastTPCloseM30=t;
-   if(tf==PERIOD_M15) g_lastTPCloseM15=t;
-   if(tf==PERIOD_M5)  g_lastTPCloseM5=t;
-}
-
-bool TF_PassTPCooldown(ENUM_TIMEFRAMES tf)
-{
-   int cool=TF_TPCoolBars(tf);
-   if(cool<=0) return true;
-
-   datetime tpT=TF_LastTPCloseTime(tf);
-   if(tpT<=0) return true;
-
-   int sh=iBarShift(_Symbol, tf, tpT, false);
-   if(sh<0) return true;
-
-   return (sh >= cool);
-}
-
-
-// Support old & friendly
-bool IsMode2Comment(const string comment)
-{
-   return (StringFind(comment, "MODE 2 ") == 0);
-}
-
-bool IsMode3Comment(const string comment)
-{
-   return (StringFind(comment, "MODE 3 ") == 0);
-}
-
-int MaxOrdersPerTFByMode(const int mode)
-{
-   // mode: 1=MODE1, 2=MODE2, else fallback to legacy limit
-   if(mode == 1) return MathMax(0, InpMaxOrdersPerTF_Mode1);
-   if(mode == 2) return MathMax(0, InpMaxOrdersPerTF_Mode2);
-   return MathMax(0, InpMaxOrdersPerTF);
-}
-
-int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
-{
-   int count = 0;
-   string tfStr = EnumToString(tf);
-   string tfToken = "_TF_" + tfStr;
-   string friendlyName = GetTFFriendlyName(tf);
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(PositionGetSymbol(i) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
-      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
-      if(InpIgnoreRiskFreeForMax && IsRiskFreeTicket(ticket)) continue;
-
-      string comment = PositionGetString(POSITION_COMMENT);
-      bool isMode2 = IsMode2Comment(comment);
-      bool isMode3 = IsMode3Comment(comment);
-
-      if(mode == 1 && (isMode2 || isMode3)) continue;
-      if(mode == 2 && !isMode2) continue;
-      if(mode == 3 && !isMode3) continue;
-
-      // Primary (strict) path: EA standard comment token
-      if(StringFind(comment, tfToken) >= 0)
-      {
-         count++;
-         continue;
-      }
-
-      // Legacy fallback: only accept comments shaped like EA orders
-      bool legacyShape = (StringFind(comment, "Buy_") == 0 || StringFind(comment, "Sell_") == 0);
-      if(!legacyShape) continue;
-      if(mode == 2 || mode == 3) continue; // legacy comments are MODE1 only
-      if(StringFind(comment, friendlyName) < 0) continue;
-
-      // Ambiguity guard for old 1H/15min style comments
-      if(tf == PERIOD_H1 && StringFind(comment, "15min") >= 0) continue;
-
-      count++;
-   }
-   return count;
-}
-
-bool HasMaxOrdersForTF(ENUM_TIMEFRAMES tf, int mode=0)
-{
-   return CountOrdersPerTF(tf, mode) >= MaxOrdersPerTFByMode(mode);
-}
-
 bool HasAnyPosition()
 {
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -2452,12 +2257,10 @@ bool PlaceOrderMode3(ENUM_TIMEFRAMES entryTF, int dir)
 // Priority: BB Exit BEFORE EMA Profit Exit / Trailing
 void CheckBBExit()
 {
-   if(HasMode3DirectionPosition(entryTF, dir))
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(InpPrintBlocks)
-         Print("MODE3 blocked (same direction exists): ", EnumToString(entryTF), " dir=", (dir==1?"BUY":"SELL"));
-      return false;
-   }
+      if(PositionGetSymbol(i) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
 
       ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
       long type = PositionGetInteger(POSITION_TYPE);
@@ -2981,41 +2784,14 @@ void ProcessTFEntry_Mode3(ENUM_TIMEFRAMES tf, int dir)
 
 void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
 {
-   if(!InpUseMode3) return false;
-   if(!g_mode3Enabled) return false;
-   if(dir == 0) return false;
-   if(g_mode3ScanDir != dir || g_mode3ScanStartHTF <= 0) return false;
-
-   if(InpMode3ScanMaxBarsHTF <= 0) return true;
-   int sh = iBarShift(_Symbol, InpHTF, g_mode3ScanStartHTF, false);
-   if(sh < 0) return true;
-   return (sh <= InpMode3ScanMaxBarsHTF);
-}
-
-void TryEntryOnTF_Mode3(ENUM_TIMEFRAMES tf, int dir)
-{
-   if(!Mode3ScanActive(dir)) return;
-   if(!IsInTradingTime()) return;
-   if(HasMode3DirectionPosition(tf, dir)) return; // one direction one order per TF
-   if(!TF_PassTPCooldown(tf)) return;
-
-   datetime sigT = iTime(_Symbol, tf, 1);
-   if(sigT <= 0 || sigT == GetLastSigMode3(tf)) return;
-   if(!CheckMACDFadeNoEMAAtShift(tf, dir, 1)) return;
-
-   SetLastSigMode3(tf, sigT);
-   PlaceOrderMode3(tf, dir);
-}
-
-void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
-{
-   if(!InpUseMode1 && !TF_UseBreakScan(tf))
-      return;
-
-   if(TF_IgnoreDonchian(tf))
+   if(!IsInTradingTime())
    {
-      if(InpUseMode1)
-         TryEntryOnTF_IgnoreDonchian(tf);
+      static datetime lastPrintTime = 0;
+      if(TimeCurrent() - lastPrintTime > 300)
+      {
+         if(InpPrintBlocks) Print("Outside trading hours: ", InpStartHour, ":", InpStartMin, "-", InpEndHour, ":", InpEndMin);
+         lastPrintTime = TimeCurrent();
+      }
       return;
    }
 
@@ -3026,7 +2802,6 @@ void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
                CountOrdersPerTF(tf, 1), "/", MaxOrdersPerTFByMode(1));
       return;
    }
-}
 
    if(!TF_PassTPCooldown(tf))
    {
@@ -3113,7 +2888,8 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
    return PlaceOrder(tf, dir, true);
 }
 
-bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
+//=========================== INIT / TICK ============================
+int OnInit()
 {
    bool badHandle = false;
 
@@ -3262,105 +3038,16 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
       Print("Handle error");
       return INIT_FAILED;
    }
+
+   Print("Donchian_MACD v4.97 - Per-TF Trailing enabled");
+   return INIT_SUCCEEDED;
 }
 
-void ManagePosition()
+void OnTick()
 {
-   TrailCleanupTable(); // v4.98: free closed tickets in throttle table
-   RiskFreeCleanupTable();
-   ManageFibTPForMode2Mode3();
-   ManageRiskFreePartialTP();
-   CheckBBExit();
-   CheckEMAProfitExit();
-   ManageTrailingStop();
-   ManageMode3Positions();
-}
+   ManagePosition();
 
-//=========================== ENTRY SCAN =============================
-bool Mode3ScanActive(int dir)
-{
-   if(!InpUseMode3) return false;
-   if(!g_mode3Enabled) return false;
-   if(dir == 0) return false;
-   if(g_mode3ScanDir != dir || g_mode3ScanStartHTF <= 0) return false;
-
-   if(InpMode3ScanMaxBarsHTF <= 0) return true;
-   int sh = iBarShift(_Symbol, InpHTF, g_mode3ScanStartHTF, false);
-   if(sh < 0) return true;
-   return (sh <= InpMode3ScanMaxBarsHTF);
-}
-
-void TryEntryOnTF_Mode3(ENUM_TIMEFRAMES tf, int dir)
-{
-   if(!Mode3ScanActive(dir)) return;
-   if(!IsInTradingTime()) return;
-   if(HasMode3DirectionPosition(tf, dir)) return; // one direction one order per TF
-   if(!TF_PassTPCooldown(tf)) return;
-
-   datetime sigT = iTime(_Symbol, tf, 1);
-   if(sigT <= 0 || sigT == GetLastSigMode3(tf)) return;
-   if(!CheckMACDFadeNoEMAAtShift(tf, dir, 1)) return;
-
-   SetLastSigMode3(tf, sigT);
-   PlaceOrderMode3(tf, dir);
-}
-
-void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
-{
-   if(!InpUseMode1 && !TF_UseBreakScan(tf))
-      return;
-
-   if(TF_IgnoreDonchian(tf))
-   {
-      if(InpUseMode1)
-         TryEntryOnTF_IgnoreDonchian(tf);
-      return;
-   }
-
-   if(InpScanOnH1CloseOnly)
-   {
-      datetime h1Closed = iTime(_Symbol, PERIOD_H1, 1);
-      if(h1Closed <= 0) return;
-      if(h1Closed == g_lastEntryScanH1Close) return;
-      g_lastEntryScanH1Close = h1Closed;
-   }
-   else if(InpEntryScanIntervalMin > 0)
-   {
-      datetime nowT = TimeCurrent();
-      if(g_lastEntryScanAt > 0 && (nowT - g_lastEntryScanAt) < (InpEntryScanIntervalMin * 60))
-         return;
-      g_lastEntryScanAt = nowT;
-   }
-
-   if(InpScanOnH1CloseOnly)
-   {
-      datetime h1Closed = iTime(_Symbol, PERIOD_H1, 1);
-      if(h1Closed <= 0) return;
-      if(h1Closed == g_lastEntryScanH1Close) return;
-      g_lastEntryScanH1Close = h1Closed;
-   }
-   else if(InpEntryScanIntervalMin > 0)
-   {
-      datetime nowT = TimeCurrent();
-      if(g_lastEntryScanAt > 0 && (nowT - g_lastEntryScanAt) < (InpEntryScanIntervalMin * 60))
-         return;
-      g_lastEntryScanAt = nowT;
-   }
-
-   if(InpScanOnH1CloseOnly)
-   {
-      datetime h1Closed = iTime(_Symbol, PERIOD_H1, 1);
-      if(h1Closed <= 0) return;
-      if(h1Closed == g_lastEntryScanH1Close) return;
-      g_lastEntryScanH1Close = h1Closed;
-   }
-   else if(InpEntryScanIntervalMin > 0)
-   {
-      datetime nowT = TimeCurrent();
-      if(g_lastEntryScanAt > 0 && (nowT - g_lastEntryScanAt) < (InpEntryScanIntervalMin * 60))
-         return;
-      g_lastEntryScanAt = nowT;
-   }
+   if(SpreadPts() > InpMaxSpreadPts || IsInNewsWindow()) return;
 
    if(InpScanOnH1CloseOnly)
    {
@@ -3479,9 +3166,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    g_chartEventBusy = false;
 }
 
-void OnTradeTransaction(const MqlTradeTransaction& trans,
-                        const MqlTradeRequest& request,
-                        const MqlTradeResult& result)
+void OnDeinit(const int reason)
 {
    if(InpKeepStateOnParamChange && reason == REASON_PARAMETERS)
       SaveRuntimeState();
