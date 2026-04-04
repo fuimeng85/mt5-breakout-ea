@@ -313,7 +313,7 @@ int g_rtTrailStepH4=0,  g_rtTrailStepH1=0,  g_rtTrailStepM30=0,  g_rtTrailStepM1
 
 string StateKeyPrefix()
 {
-   return "BRK_STATE_" + _Symbol + "_" + IntegerToString((int)InpMagic) + "_" + IntegerToString((int)ChartID()) + "_";
+   return StringFormat("B5_%s_%X_%X_", _Symbol, (ulong)InpMagic, (ulong)ChartID());
 }
 
 void SaveRuntimeState()
@@ -2075,8 +2075,65 @@ bool CheckMACDSignalAtShift(ENUM_TIMEFRAMES tf, int dir, int shift, EMacdScanMod
 bool HasMACDSignalInLookback(ENUM_TIMEFRAMES tf, int dir, int lookback, EMacdScanMode mode)
 {
    if(lookback < 1) lookback = 1;
+   int fastH = FastH(tf), slowH = SlowH(tf), emaH = EmaH(tf);
+   if(fastH == INVALID_HANDLE || slowH == INVALID_HANDLE || emaH == INVALID_HANDLE) return false;
+
+   int barsNeed = MathMax(lookback + InpSignalSMA + 5, lookback + 3);
+   double fast[], slow[], ema[];
+   ArraySetAsSeries(fast, true);
+   ArraySetAsSeries(slow, true);
+   ArraySetAsSeries(ema, true);
+   if(CopyBuffer(fastH, 0, 0, barsNeed, fast) < barsNeed ||
+      CopyBuffer(slowH, 0, 0, barsNeed, slow) < barsNeed ||
+      CopyBuffer(emaH, 0, 0, lookback + 3, ema) < lookback + 3)
+      return false;
+
+   double mainLine[];
+   ArrayResize(mainLine, barsNeed);
+   for(int i=0;i<barsNeed;i++) mainLine[i]=fast[i]-slow[i];
+
    for(int sh=1; sh<=lookback; sh++)
-      if(CheckMACDSignalAtShift(tf, dir, sh, mode)) return true;
+   {
+      double sigNow=0.0, sigPrev=0.0;
+      int cntNow=0, cntPrev=0;
+      for(int i=sh; i<sh+InpSignalSMA && i<barsNeed; i++) { sigNow += mainLine[i]; cntNow++; }
+      for(int i=sh+1; i<sh+1+InpSignalSMA && i<barsNeed; i++) { sigPrev += mainLine[i]; cntPrev++; }
+      if(cntNow <= 0 || cntPrev <= 0) continue;
+      sigNow  /= (double)cntNow;
+      sigPrev /= (double)cntPrev;
+
+      double mainNow  = mainLine[sh];
+      double mainPrev = mainLine[sh+1];
+      double closeNow = iClose(_Symbol, tf, sh);
+      double emaNow   = ema[sh];
+      if(closeNow == 0.0) continue;
+
+      if(mode == MACD_SCAN_CROSS)
+      {
+         if(dir==1)
+         {
+            if(mainPrev <= sigPrev && mainNow > sigNow && closeNow > emaNow) return true;
+         }
+         else
+         {
+            if(mainPrev >= sigPrev && mainNow < sigNow && closeNow < emaNow) return true;
+         }
+         continue;
+      }
+
+      double histNow  = mainNow - sigNow;
+      double histPrev = mainPrev - sigPrev;
+      bool isLightPink  = (histNow < 0 && histNow >= histPrev);
+      bool isLightGreen = (histNow >= 0 && histNow <= histPrev);
+      if(dir==1)
+      {
+         if(mainNow > 0 && sigNow > 0 && closeNow > emaNow && isLightPink) return true;
+      }
+      else
+      {
+         if(mainNow < 0 && sigNow < 0 && closeNow < emaNow && isLightGreen) return true;
+      }
+   }
    return false;
 }
 
@@ -2949,6 +3006,51 @@ void TryEntryOnTF(ENUM_TIMEFRAMES tf, int dir)
       PlaceOrder(tf, dir);
       return;
    }
+
+   if(!TF_PassTPCooldown(tf))
+   {
+      if(InpPrintBlocks)
+         Print("Blocked by TP cooldown: ", EnumToString(tf), " coolBars=", TF_TPCoolBars(tf));
+      return;
+   }
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSig(tf)) return;
+
+   int dir = 0;
+   if(CheckMACDSignal(tf, 1)) dir = 1;
+   else if(CheckMACDSignal(tf, -1)) dir = -1;
+   if(dir == 0) return;
+
+   SetLastSig(tf, sigT);
+   PlaceOrder(tf, dir);
+   return;
+}
+
+bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
+{
+   if(!g_newBreakoutSignal) return false;
+   if(!TF_UseBreakScan(tf)) return false;
+   if(!IsInTradingTime()) return false;
+   if(HasMaxOrdersForTF(tf, 2)) return false;
+   if(!TF_PassTPCooldown(tf)) return false;
+
+   datetime sigT = iTime(_Symbol, tf, 1);
+   if(sigT <= 0 || sigT == GetLastSigMode2(tf)) return false;
+
+   int lookback = TF_BreakScanBars(tf);
+   EMacdScanMode mode = TF_BreakScanMode(tf);
+   if(!HasMACDSignalInLookback(tf, dir, lookback, mode)) return false;
+
+   SetLastSigMode2(tf, sigT);
+
+   if(InpPrintSignals)
+      Print("BreakoutScan Entry: ", EnumToString(tf),
+            " mode=", EnumToString(mode),
+            " lookback=", lookback,
+            " dir=", (dir==1?"BUY":"SELL"));
+
+   return PlaceOrder(tf, dir, true);
 }
 
 void TryEntryOnTF_IgnoreDonchian(ENUM_TIMEFRAMES tf)
@@ -3251,7 +3353,7 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
    if(!tfFound)
    {
       long posId = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
-      if(posId > 0 && HistorySelect(TimeCurrent()-86400*365, TimeCurrent()+60))
+      if(posId > 0 && HistorySelectByPosition(posId))
       {
          int n = HistoryDealsTotal();
          for(int i=n-1; i>=0; i--)

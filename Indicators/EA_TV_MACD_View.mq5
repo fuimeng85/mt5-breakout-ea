@@ -35,10 +35,6 @@ int OnInit()
    SetIndexBuffer(1, g_sigBuf, INDICATOR_DATA);
    SetIndexBuffer(2, g_histBuf, INDICATOR_DATA);
 
-   ArraySetAsSeries(g_mainBuf, true);
-   ArraySetAsSeries(g_sigBuf, true);
-   ArraySetAsSeries(g_histBuf, true);
-
    g_fastH = iMA(_Symbol, _Period, InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    g_slowH = iMA(_Symbol, _Period, InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
    if(g_fastH==INVALID_HANDLE || g_slowH==INVALID_HANDLE)
@@ -65,21 +61,21 @@ int OnCalculate(const int rates_total,
    if(rates_total <= InpSignalSMA + 2) return 0;
 
    double fast[], slow[];
-   ArraySetAsSeries(fast, true);
-   ArraySetAsSeries(slow, true);
-
    if(CopyBuffer(g_fastH, 0, 0, rates_total, fast) < rates_total) return prev_calculated;
    if(CopyBuffer(g_slowH, 0, 0, rates_total, slow) < rates_total) return prev_calculated;
 
-   for(int i=0;i<rates_total;i++)
+   int start = (prev_calculated > 0 ? prev_calculated - 1 : 0);
+   if(start < 0) start = 0;
+
+   for(int i=start; i<rates_total; i++)
       g_mainBuf[i] = fast[i] - slow[i];
 
-   for(int i=0;i<rates_total;i++)
+   for(int i=start; i<rates_total; i++)
    {
-      if(i + InpSignalSMA - 1 < rates_total)
+      if(i >= InpSignalSMA - 1)
       {
          double sum = 0.0;
-         for(int k=i; k<i+InpSignalSMA; k++) sum += g_mainBuf[k];
+         for(int k=i - InpSignalSMA + 1; k<=i; k++) sum += g_mainBuf[k];
          g_sigBuf[i] = sum / InpSignalSMA;
          g_histBuf[i] = g_mainBuf[i] - g_sigBuf[i];
       }
