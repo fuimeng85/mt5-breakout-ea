@@ -472,8 +472,6 @@ void MarkRiskFree(ulong ticket, bool enabled=true)
    int idx=FindRiskFreeIndex(ticket);
    if(idx<0) idx=AllocRiskFreeIndex(ticket);
    if(idx>=0) g_rfEnabled[idx]=enabled;
-   else if(InpPrintBlocks)
-      Print("Risk-Free tracking table full, cannot track ticket=", ticket);
 }
 
 bool IsRiskFreeTicket(ulong ticket)
@@ -1508,7 +1506,7 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
       bool isMode2 = IsMode2Comment(comment);
       bool isMode3 = IsMode3Comment(comment);
 
-      if(mode == 1 && (isMode2 || isMode3)) continue;
+      if(mode == 1 && isMode2)  continue;
       if(mode == 2 && !isMode2) continue;
       if(mode == 3 && !isMode3) continue;
 
