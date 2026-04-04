@@ -234,6 +234,10 @@ input ENUM_TIMEFRAMES InpShowEAMACD_TF   = PERIOD_H1;
 input group "=== 8C) UI: TF Toggle Buttons ==="
 input bool            InpShowTFButtons   = true;
 input bool            InpShowModeButtons = true;
+input bool            InpShowTrailDashboard = true;
+input ENUM_BASE_CORNER InpTrailDashCorner = CORNER_LEFT_UPPER;
+input int             InpTrailDashX = 10;
+input int             InpTrailDashY = 200;
 
 input group "=== 9) Risk-Free Partial TP (MODE1/2/3) ==="
 input bool            InpUseRSIPartialTP      = false;
@@ -302,7 +306,6 @@ datetime g_lastTPCloseH4=0, g_lastTPCloseH1=0, g_lastTPCloseM30=0, g_lastTPClose
 
 bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false;
 bool g_mode2Enabled=true, g_mode3Enabled=false;
-bool g_chartEventBusy=false;
 
 int g_rtTrailStartH4=0, g_rtTrailStartH1=0, g_rtTrailStartM30=0, g_rtTrailStartM15=0, g_rtTrailStartM5=0;
 int g_rtTrailDistH4=0,  g_rtTrailDistH1=0,  g_rtTrailDistM30=0,  g_rtTrailDistM15=0,  g_rtTrailDistM5=0;
@@ -1040,6 +1043,192 @@ void InitRuntimeTrailParamsFromInputs()
    g_rtTrailStepM30  = InpM30_TrailStepPts;
    g_rtTrailStepM15  = InpM15_TrailStepPts;
    g_rtTrailStepM5   = InpM5_TrailStepPts;
+}
+
+string TD_EditName(ENUM_TIMEFRAMES tf, const string field)
+{
+   return "EA_TD_" + EnumToString(tf) + "_" + field;
+}
+
+void TD_SetOne(ENUM_TIMEFRAMES tf, const string field, int v)
+{
+   if(field=="START")
+   {
+      if(tf==PERIOD_H4)  g_rtTrailStartH4=v;
+      if(tf==PERIOD_H1)  g_rtTrailStartH1=v;
+      if(tf==PERIOD_M30) g_rtTrailStartM30=v;
+      if(tf==PERIOD_M15) g_rtTrailStartM15=v;
+      if(tf==PERIOD_M5)  g_rtTrailStartM5=v;
+      return;
+   }
+   if(field=="DIST")
+   {
+      if(tf==PERIOD_H4)  g_rtTrailDistH4=v;
+      if(tf==PERIOD_H1)  g_rtTrailDistH1=v;
+      if(tf==PERIOD_M30) g_rtTrailDistM30=v;
+      if(tf==PERIOD_M15) g_rtTrailDistM15=v;
+      if(tf==PERIOD_M5)  g_rtTrailDistM5=v;
+      return;
+   }
+   if(field=="STEP")
+   {
+      if(tf==PERIOD_H4)  g_rtTrailStepH4=v;
+      if(tf==PERIOD_H1)  g_rtTrailStepH1=v;
+      if(tf==PERIOD_M30) g_rtTrailStepM30=v;
+      if(tf==PERIOD_M15) g_rtTrailStepM15=v;
+      if(tf==PERIOD_M5)  g_rtTrailStepM5=v;
+      return;
+   }
+}
+
+int TD_GetOne(ENUM_TIMEFRAMES tf, const string field)
+{
+   if(field=="START")
+   {
+      if(tf==PERIOD_H4)  return g_rtTrailStartH4;
+      if(tf==PERIOD_H1)  return g_rtTrailStartH1;
+      if(tf==PERIOD_M30) return g_rtTrailStartM30;
+      if(tf==PERIOD_M15) return g_rtTrailStartM15;
+      if(tf==PERIOD_M5)  return g_rtTrailStartM5;
+      return 1500;
+   }
+   if(field=="DIST")
+   {
+      if(tf==PERIOD_H4)  return g_rtTrailDistH4;
+      if(tf==PERIOD_H1)  return g_rtTrailDistH1;
+      if(tf==PERIOD_M30) return g_rtTrailDistM30;
+      if(tf==PERIOD_M15) return g_rtTrailDistM15;
+      if(tf==PERIOD_M5)  return g_rtTrailDistM5;
+      return 500;
+   }
+   if(field=="STEP")
+   {
+      if(tf==PERIOD_H4)  return g_rtTrailStepH4;
+      if(tf==PERIOD_H1)  return g_rtTrailStepH1;
+      if(tf==PERIOD_M30) return g_rtTrailStepM30;
+      if(tf==PERIOD_M15) return g_rtTrailStepM15;
+      if(tf==PERIOD_M5)  return g_rtTrailStepM5;
+      return 50;
+   }
+   return 0;
+}
+
+void TrailDashboardRefreshUI()
+{
+   if(!InpShowTrailDashboard) return;
+   ENUM_TIMEFRAMES arr[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
+   string fields[3] = {"START","DIST","STEP"};
+   for(int i=0;i<5;i++)
+      for(int j=0;j<3;j++)
+      {
+         string en = TD_EditName(arr[i], fields[j]);
+         if(ObjectFind(0, en) >= 0)
+            ObjectSetString(0, en, OBJPROP_TEXT, IntegerToString(TD_GetOne(arr[i], fields[j])));
+      }
+}
+
+void TrailDashboardCreate()
+{
+   if(!InpShowTrailDashboard) return;
+   ENUM_TIMEFRAMES arr[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
+   string fields[3] = {"START","DIST","STEP"};
+
+   int baseX = InpTrailDashX, baseY = InpTrailDashY, rowH = 20, colW = 72, gap = 4;
+   ENUM_BASE_CORNER corner = InpTrailDashCorner;
+   string header = "EA_TD_HEADER";
+   if(ObjectFind(0, header) < 0)
+   {
+      ObjectCreate(0, header, OBJ_LABEL, 0, 0, 0);
+   }
+   ObjectSetInteger(0, header, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, header, OBJPROP_XDISTANCE, baseX);
+   ObjectSetInteger(0, header, OBJPROP_YDISTANCE, baseY-16);
+   ObjectSetString(0, header, OBJPROP_TEXT, "5C Trail Dashboard (edit + Apply)");
+   ObjectSetInteger(0, header, OBJPROP_COLOR, clrGold);
+   ObjectSetInteger(0, header, OBJPROP_FONTSIZE, 9);
+
+   for(int i=0;i<5;i++)
+   {
+      string rowLbl = "EA_TD_ROW_" + EnumToString(arr[i]);
+      if(ObjectFind(0, rowLbl) < 0)
+      {
+         ObjectCreate(0, rowLbl, OBJ_LABEL, 0, 0, 0);
+      }
+      ObjectSetInteger(0, rowLbl, OBJPROP_CORNER, corner);
+      ObjectSetInteger(0, rowLbl, OBJPROP_XDISTANCE, baseX);
+      ObjectSetInteger(0, rowLbl, OBJPROP_YDISTANCE, baseY + i*(rowH+gap) + 3);
+      ObjectSetString(0, rowLbl, OBJPROP_TEXT, GetTFFriendlyName(arr[i]));
+      ObjectSetInteger(0, rowLbl, OBJPROP_COLOR, clrWhite);
+      ObjectSetInteger(0, rowLbl, OBJPROP_FONTSIZE, 8);
+
+      for(int j=0;j<3;j++)
+      {
+         string en = TD_EditName(arr[i], fields[j]);
+         if(ObjectFind(0, en) < 0)
+         {
+            ObjectCreate(0, en, OBJ_EDIT, 0, 0, 0);
+         }
+         ObjectSetInteger(0, en, OBJPROP_CORNER, corner);
+         ObjectSetInteger(0, en, OBJPROP_XDISTANCE, baseX + 36 + j*(colW+gap));
+         ObjectSetInteger(0, en, OBJPROP_YDISTANCE, baseY + i*(rowH+gap));
+         ObjectSetInteger(0, en, OBJPROP_XSIZE, colW);
+         ObjectSetInteger(0, en, OBJPROP_YSIZE, rowH);
+         ObjectSetInteger(0, en, OBJPROP_FONTSIZE, 8);
+         ObjectSetInteger(0, en, OBJPROP_SELECTABLE, true);
+         ObjectSetInteger(0, en, OBJPROP_HIDDEN, false);
+         ObjectSetInteger(0, en, OBJPROP_READONLY, false);
+      }
+   }
+
+   string applyBtn = "EA_TD_APPLY";
+   if(ObjectFind(0, applyBtn) < 0)
+   {
+      ObjectCreate(0, applyBtn, OBJ_BUTTON, 0, 0, 0);
+   }
+   ObjectSetInteger(0, applyBtn, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, applyBtn, OBJPROP_XDISTANCE, baseX + 36 + 3*(colW+gap));
+   ObjectSetInteger(0, applyBtn, OBJPROP_YDISTANCE, baseY + 2*(rowH+gap));
+   ObjectSetInteger(0, applyBtn, OBJPROP_XSIZE, 70);
+   ObjectSetInteger(0, applyBtn, OBJPROP_YSIZE, rowH+6);
+   ObjectSetString(0, applyBtn, OBJPROP_TEXT, "Apply 5C");
+   ObjectSetInteger(0, applyBtn, OBJPROP_BGCOLOR, clrLimeGreen);
+   ObjectSetInteger(0, applyBtn, OBJPROP_COLOR, clrBlack);
+   ObjectSetInteger(0, applyBtn, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, applyBtn, OBJPROP_FONTSIZE, 9);
+
+   TrailDashboardRefreshUI();
+}
+
+void TrailDashboardDelete()
+{
+   int total = ObjectsTotal(0, 0, -1);
+   for(int i=total-1; i>=0; i--)
+   {
+      string n = ObjectName(0, i, 0, -1);
+      if(StringFind(n, "EA_TD_") == 0)
+         ObjectDelete(0, n);
+   }
+}
+
+void TrailDashboardApplyFromUI()
+{
+   if(!InpShowTrailDashboard) return;
+   ENUM_TIMEFRAMES arr[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
+   string fields[3] = {"START","DIST","STEP"};
+   for(int i=0;i<5;i++)
+   {
+      for(int j=0;j<3;j++)
+      {
+         string en = TD_EditName(arr[i], fields[j]);
+         if(ObjectFind(0, en) < 0) continue;
+         string txt = ObjectGetString(0, en, OBJPROP_TEXT);
+         int v = (int)StringToInteger(txt);
+         if(v < 0) v = 0;
+         TD_SetOne(arr[i], fields[j], v);
+      }
+   }
+   TrailDashboardRefreshUI();
+   if(InpPrintSignals) Print("5C Trail Dashboard applied.");
 }
 
 bool IsInTradingTime()
@@ -2968,6 +3157,7 @@ int OnInit()
 
    TFButtonsCreate();
    ModeButtonsCreate();
+   TrailDashboardCreate();
 
    if(InpUseATRFilter) g_atrHTF = iATR(_Symbol, InpHTF, InpATRPeriod);
    if(InpUseATRFilter && g_atrHTF==INVALID_HANDLE) badHandle = true;
@@ -3145,25 +3335,26 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-   if(g_chartEventBusy) return;
-   g_chartEventBusy = true;
+   if(id == CHARTEVENT_OBJECT_ENDEDIT)
+   {
+      if(StringFind(sparam, "EA_TD_") == 0)
+      {
+         TrailDashboardApplyFromUI();
+         return;
+      }
+   }
 
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
-      if(ObjectFind(0, sparam) < 0)
+      if(sparam == "EA_TD_APPLY")
       {
-         g_chartEventBusy = false;
+         TrailDashboardApplyFromUI();
          return;
       }
       if(ModeButtonTryToggle(sparam))
-      {
-         g_chartEventBusy = false;
          return;
-      }
       TFButtonTryToggle(sparam);
    }
-
-   g_chartEventBusy = false;
 }
 
 void OnDeinit(const int reason)
@@ -3174,6 +3365,7 @@ void OnDeinit(const int reason)
    TM_DeleteAllObjects();
    TFButtonsDelete();
    ModeButtonsDelete();
+   TrailDashboardDelete();
    if(g_dbgMacdPanelH!=INVALID_HANDLE)
    {
       IndicatorRelease(g_dbgMacdPanelH);
