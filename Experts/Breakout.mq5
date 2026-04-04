@@ -1434,6 +1434,21 @@ double CalcMode3LotByRisk(double entryPrice, double slPrice)
    return NormalizeLot(riskMoney / riskPerLot);
 }
 
+double CalcMode3LotByRisk(double entryPrice, double slPrice)
+{
+   if(!InpMode3UseAutoLot) return NormalizeLot(InpMode3FixedLot);
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double riskMoney = equity * (InpMode3RiskPercent / 100.0);
+   double dist = MathAbs(entryPrice - slPrice);
+   if(dist <= 0) dist = 10 * P();
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tickValue <= 0 || tickSize <= 0) return NormalizeLot(InpMode3FixedLot);
+   double riskPerLot = dist * (tickValue / tickSize);
+   if(riskPerLot <= 0) return NormalizeLot(InpMode3FixedLot);
+   return NormalizeLot(riskMoney / riskPerLot);
+}
+
 string ToUpperStr(string s) { StringToUpper(s); return s; }
 
 void TF_SetLastTPCloseTime(ENUM_TIMEFRAMES tf, datetime t)
@@ -2452,58 +2467,6 @@ void CheckBBExit()
       if(IsMode3Comment(comment)) continue;
       ENUM_TIMEFRAMES entryTF = ParseEntryTF(comment, (ENUM_TIMEFRAMES)_Period);
 
-   trade.SetExpertMagicNumber((int)InpMagic);
-   trade.SetDeviationInPoints(20);
-
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   if(ask <= 0 || bid <= 0) return false;
-
-   bool isBuy = (dir == 1);
-   double entryPrice = isBuy ? ask : bid;
-   int slLookback = TF_SLLookbackBars(entryTF);
-   double sl = CalculateInitialSL(entryTF, dir, slLookback);
-   if(sl == 0.0) return false;
-   double tp = 0.0; // MODE3: exit by MACD fade/BE/trailing
-   double lot = CalcMode3LotByRisk(entryPrice, sl);
-
-   if(isBuy && sl >= entryPrice) return false;
-   if(!isBuy && sl <= entryPrice) return false;
-
-   string tfFriendly = GetTFFriendlyName(entryTF);
-   string tfInternal = EnumToString(entryTF);
-   string comment = "MODE 3 " + tfFriendly + " " + (isBuy ? "buy" : "sell") + "_TF_" + tfInternal;
-
-   bool ok = isBuy ? trade.Buy(lot, _Symbol, entryPrice, sl, tp, comment)
-                   : trade.Sell(lot, _Symbol, entryPrice, sl, tp, comment);
-   if(ok && InpPrintSignals)
-      Print("Order MODE3: ", comment, " Lot=", lot);
-
-   return ok;
-}
-
-//=========================== EXIT MANAGEMENT ========================
-
-// Priority: BB Exit BEFORE EMA Profit Exit / Trailing
-void CheckBBExit()
-{
-   if(HasMode3DirectionPosition(entryTF, dir))
-   {
-      if(InpPrintBlocks)
-         Print("MODE3 blocked (same direction exists): ", EnumToString(entryTF), " dir=", (dir==1?"BUY":"SELL"));
-      return false;
-   }
-
-      ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
-      long type = PositionGetInteger(POSITION_TYPE);
-      bool isBuy = (type == POSITION_TYPE_BUY);
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      if(bid <= 0 || ask <= 0) continue;
-      string comment = PositionGetString(POSITION_COMMENT);
-      if(IsMode3Comment(comment)) continue;
-      ENUM_TIMEFRAMES entryTF = ParseEntryTF(comment, (ENUM_TIMEFRAMES)_Period);
-
       if(!TF_UseBBExit(entryTF)) continue;
 
       ENUM_TIMEFRAMES bbTF = TF_BB_TF(entryTF);
@@ -3148,7 +3111,7 @@ bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
    return PlaceOrder(tf, dir, true);
 }
 
-void ManageFibTPForMode2Mode3()
+bool TryEntryOnTF_BreakoutScan(ENUM_TIMEFRAMES tf, int dir)
 {
    bool badHandle = false;
 
@@ -3350,6 +3313,21 @@ void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
       if(InpUseMode1)
          TryEntryOnTF_IgnoreDonchian(tf);
       return;
+   }
+
+   if(InpScanOnH1CloseOnly)
+   {
+      datetime h1Closed = iTime(_Symbol, PERIOD_H1, 1);
+      if(h1Closed <= 0) return;
+      if(h1Closed == g_lastEntryScanH1Close) return;
+      g_lastEntryScanH1Close = h1Closed;
+   }
+   else if(InpEntryScanIntervalMin > 0)
+   {
+      datetime nowT = TimeCurrent();
+      if(g_lastEntryScanAt > 0 && (nowT - g_lastEntryScanAt) < (InpEntryScanIntervalMin * 60))
+         return;
+      g_lastEntryScanAt = nowT;
    }
 
    if(InpScanOnH1CloseOnly)
