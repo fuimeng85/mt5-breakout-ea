@@ -233,7 +233,11 @@ input ENUM_TIMEFRAMES InpShowEAMACD_TF   = PERIOD_H1;
 
 input group "=== 8C) UI: TF Toggle Buttons ==="
 input bool            InpShowTFButtons   = true;
+input bool            InpShowModeButtons = true;
 input bool            InpShowTrailDashboard = true;
+input ENUM_BASE_CORNER InpTrailDashCorner = CORNER_LEFT_UPPER;
+input int             InpTrailDashX = 10;
+input int             InpTrailDashY = 200;
 
 input group "=== 9) Risk-Free Partial TP (MODE1/2/3) ==="
 input bool            InpUseRSIPartialTP      = false;
@@ -301,6 +305,7 @@ datetime g_mode3ScanStartHTF = 0;
 datetime g_lastTPCloseH4=0, g_lastTPCloseH1=0, g_lastTPCloseM30=0, g_lastTPCloseM15=0, g_lastTPCloseM5=0;
 
 bool g_useH4=false, g_useH1=false, g_useM30=false, g_useM15=false, g_useM5=false;
+bool g_mode2Enabled=true, g_mode3Enabled=false;
 
 int g_rtTrailStartH4=0, g_rtTrailStartH1=0, g_rtTrailStartM30=0, g_rtTrailStartM15=0, g_rtTrailStartM5=0;
 int g_rtTrailDistH4=0,  g_rtTrailDistH1=0,  g_rtTrailDistM30=0,  g_rtTrailDistM15=0,  g_rtTrailDistM5=0;
@@ -346,6 +351,8 @@ void SaveRuntimeState()
    GlobalVariableSet(p + "trStepM30", (double)g_rtTrailStepM30);
    GlobalVariableSet(p + "trStepM15", (double)g_rtTrailStepM15);
    GlobalVariableSet(p + "trStepM5", (double)g_rtTrailStepM5);
+   GlobalVariableSet(p + "mode2En", g_mode2Enabled ? 1.0 : 0.0);
+   GlobalVariableSet(p + "mode3En", g_mode3Enabled ? 1.0 : 0.0);
 }
 
 bool LoadRuntimeState()
@@ -384,6 +391,8 @@ bool LoadRuntimeState()
    if(GlobalVariableCheck(p + "trStepM30"))  g_rtTrailStepM30  = (int)GlobalVariableGet(p + "trStepM30");
    if(GlobalVariableCheck(p + "trStepM15"))  g_rtTrailStepM15  = (int)GlobalVariableGet(p + "trStepM15");
    if(GlobalVariableCheck(p + "trStepM5"))   g_rtTrailStepM5   = (int)GlobalVariableGet(p + "trStepM5");
+   if(GlobalVariableCheck(p + "mode2En"))    g_mode2Enabled    = (GlobalVariableGet(p + "mode2En") > 0.5);
+   if(GlobalVariableCheck(p + "mode3En"))    g_mode3Enabled    = (GlobalVariableGet(p + "mode3En") > 0.5);
    g_newBreakoutSignal = false; // 避免参数修改重启后误判为新突破
 
    return true;
@@ -929,6 +938,90 @@ bool TFButtonTryToggle(const string obj)
    return false;
 }
 
+string ModeButtonName(const string mode)
+{
+   return "EA_MODE_BTN_" + mode;
+}
+
+bool ModeEnabled(const string mode)
+{
+   if(mode=="MODE2") return g_mode2Enabled;
+   if(mode=="MODE3") return (InpUseMode3 && g_mode3Enabled);
+   return false;
+}
+
+void ModeButtonUpdate(const string mode)
+{
+   string name = ModeButtonName(mode);
+   bool on = ModeEnabled(mode);
+   string txt = mode + (on ? " ON" : " OFF");
+   if(mode=="MODE3" && !InpUseMode3)
+      txt = "MODE3 OFF(inp)";
+   ObjectSetString(0, name, OBJPROP_TEXT, txt);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, on ? clrLimeGreen : clrTomato);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrBlack);
+}
+
+void ModeButtonsCreate()
+{
+   if(!InpShowModeButtons) return;
+   string modes[2] = {"MODE2","MODE3"};
+   int x=10, y=145, w=80, h=20, gap=4;
+   for(int i=0;i<2;i++)
+   {
+      string name = ModeButtonName(modes[i]);
+      if(ObjectFind(0, name) < 0)
+      {
+         ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
+         ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+         ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+         ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y + i*(h+gap));
+         ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+         ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+         ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+         ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      }
+      ModeButtonUpdate(modes[i]);
+   }
+}
+
+void ModeButtonsDelete()
+{
+   string modes[2] = {"MODE2","MODE3"};
+   for(int i=0;i<2;i++)
+   {
+      string name = ModeButtonName(modes[i]);
+      if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
+   }
+}
+
+bool ModeButtonTryToggle(const string obj)
+{
+   if(obj == ModeButtonName("MODE2"))
+   {
+      g_mode2Enabled = !g_mode2Enabled;
+      ModeButtonUpdate("MODE2");
+      if(InpPrintSignals) Print("Mode toggle: MODE2 -> ", (g_mode2Enabled ? "ON" : "OFF"));
+      return true;
+   }
+   if(obj == ModeButtonName("MODE3"))
+   {
+      if(!InpUseMode3)
+      {
+         if(InpPrintBlocks) Print("MODE3 is disabled by InpUseMode3=false");
+         ModeButtonUpdate("MODE3");
+         return true;
+      }
+      g_mode3Enabled = !g_mode3Enabled;
+      ModeButtonUpdate("MODE3");
+      if(InpPrintSignals) Print("Mode toggle: MODE3 -> ", (g_mode3Enabled ? "ON" : "OFF"));
+      return true;
+   }
+   return false;
+}
+
 void InitRuntimeTrailParamsFromInputs()
 {
    g_rtTrailStartH4  = InpH4_TrailStartPts;
@@ -1038,12 +1131,13 @@ void TrailDashboardCreate()
    ENUM_TIMEFRAMES arr[5] = {PERIOD_H4, PERIOD_H1, PERIOD_M30, PERIOD_M15, PERIOD_M5};
    string fields[3] = {"START","DIST","STEP"};
 
-   int baseX = 110, baseY = 20, rowH = 20, colW = 72, gap = 4;
+   int baseX = InpTrailDashX, baseY = InpTrailDashY, rowH = 20, colW = 72, gap = 4;
+   ENUM_BASE_CORNER corner = InpTrailDashCorner;
    string header = "EA_TD_HEADER";
    if(ObjectFind(0, header) < 0)
    {
       ObjectCreate(0, header, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, header, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, header, OBJPROP_CORNER, corner);
       ObjectSetInteger(0, header, OBJPROP_XDISTANCE, baseX);
       ObjectSetInteger(0, header, OBJPROP_YDISTANCE, baseY-16);
       ObjectSetString(0, header, OBJPROP_TEXT, "5C Trail Dashboard (edit + Apply)");
@@ -1057,7 +1151,7 @@ void TrailDashboardCreate()
       if(ObjectFind(0, rowLbl) < 0)
       {
          ObjectCreate(0, rowLbl, OBJ_LABEL, 0, 0, 0);
-         ObjectSetInteger(0, rowLbl, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+         ObjectSetInteger(0, rowLbl, OBJPROP_CORNER, corner);
          ObjectSetInteger(0, rowLbl, OBJPROP_XDISTANCE, baseX);
          ObjectSetInteger(0, rowLbl, OBJPROP_YDISTANCE, baseY + i*(rowH+gap) + 3);
          ObjectSetString(0, rowLbl, OBJPROP_TEXT, GetTFFriendlyName(arr[i]));
@@ -1071,13 +1165,14 @@ void TrailDashboardCreate()
          if(ObjectFind(0, en) < 0)
          {
             ObjectCreate(0, en, OBJ_EDIT, 0, 0, 0);
-            ObjectSetInteger(0, en, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+            ObjectSetInteger(0, en, OBJPROP_CORNER, corner);
             ObjectSetInteger(0, en, OBJPROP_XDISTANCE, baseX + 36 + j*(colW+gap));
             ObjectSetInteger(0, en, OBJPROP_YDISTANCE, baseY + i*(rowH+gap));
             ObjectSetInteger(0, en, OBJPROP_XSIZE, colW);
             ObjectSetInteger(0, en, OBJPROP_YSIZE, rowH);
             ObjectSetInteger(0, en, OBJPROP_FONTSIZE, 8);
             ObjectSetInteger(0, en, OBJPROP_SELECTABLE, true);
+            ObjectSetInteger(0, en, OBJPROP_READONLY, false);
          }
       }
    }
@@ -1086,7 +1181,7 @@ void TrailDashboardCreate()
    if(ObjectFind(0, applyBtn) < 0)
    {
       ObjectCreate(0, applyBtn, OBJ_BUTTON, 0, 0, 0);
-      ObjectSetInteger(0, applyBtn, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, applyBtn, OBJPROP_CORNER, corner);
       ObjectSetInteger(0, applyBtn, OBJPROP_XDISTANCE, baseX + 36 + 3*(colW+gap));
       ObjectSetInteger(0, applyBtn, OBJPROP_YDISTANCE, baseY + 2*(rowH+gap));
       ObjectSetInteger(0, applyBtn, OBJPROP_XSIZE, 70);
@@ -1398,7 +1493,6 @@ int CountOrdersPerTF(ENUM_TIMEFRAMES tf, int mode=0)
    string tfStr = EnumToString(tf);
    string tfToken = "_TF_" + tfStr;
    string friendlyName = GetTFFriendlyName(tf);
-   bool needsH1Guard = (tf == PERIOD_H1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -2757,6 +2851,7 @@ void ManagePosition()
 bool Mode3ScanActive(int dir)
 {
    if(!InpUseMode3) return false;
+   if(!g_mode3Enabled) return false;
    if(dir == 0) return false;
    if(g_mode3ScanDir != dir || g_mode3ScanStartHTF <= 0) return false;
 
@@ -2800,7 +2895,7 @@ void ProcessTFEntry_Mode1Mode2(ENUM_TIMEFRAMES tf, int dir)
       return;
 
    bool useBreakScan = TF_UseBreakScan(tf);
-   if(useBreakScan)
+   if(useBreakScan && g_mode2Enabled)
    {
       bool placedMode2 = TryEntryOnTF_BreakoutScan(tf, dir);
       if(InpBreakScanExclusive || (placedMode2 && !InpAllowMode1WithMode2))
@@ -2990,6 +3085,8 @@ int OnInit()
    g_useM30 = InpUseM30;
    g_useM15 = InpUseM15;
    g_useM5  = InpUseM5;
+   g_mode2Enabled = true;
+   g_mode3Enabled = InpUseMode3;
    InitRuntimeTrailParamsFromInputs();
 
    if(InpKeepStateOnParamChange && LoadRuntimeState() && InpPrintSignals)
@@ -2999,6 +3096,7 @@ int OnInit()
       Print("Notice: current account is NETTING; MODE1/MODE2/MODE3 cannot hold separate positions simultaneously on same symbol.");
 
    TFButtonsCreate();
+   ModeButtonsCreate();
    TrailDashboardCreate();
 
    if(InpUseATRFilter) g_atrHTF = iATR(_Symbol, InpHTF, InpATRPeriod);
@@ -3177,6 +3275,15 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
 
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+   if(id == CHARTEVENT_OBJECT_ENDEDIT)
+   {
+      if(StringFind(sparam, "EA_TD_") == 0)
+      {
+         TrailDashboardApplyFromUI();
+         return;
+      }
+   }
+
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
       if(sparam == "EA_TD_APPLY")
@@ -3184,6 +3291,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          TrailDashboardApplyFromUI();
          return;
       }
+      if(ModeButtonTryToggle(sparam))
+         return;
       TFButtonTryToggle(sparam);
    }
 }
@@ -3195,6 +3304,7 @@ void OnDeinit(const int reason)
 
    TM_DeleteAllObjects();
    TFButtonsDelete();
+   ModeButtonsDelete();
    TrailDashboardDelete();
    if(g_dbgMacdPanelH!=INVALID_HANDLE)
    {
