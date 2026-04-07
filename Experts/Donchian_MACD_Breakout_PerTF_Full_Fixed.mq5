@@ -1,7 +1,7 @@
-Source: https://raw.githubusercontent.com/fuimeng85/mt5-breakout-ea/main/Experts/Breakout%20588.mq5
-
----
-
+// Source: https://raw.githubusercontent.com/fuimeng85/mt5-breakout-ea/main/Experts/Breakout%20588.mq5
+//
+// ---
+//
 //+------------------------------------------------------------------+
 //| Donchian_MACD_Breakout_PerTF_Full.mq5                            |
 //| Per TF Max Orders + 友好Comment标识 (5min/15min/1H等)            |
@@ -10,6 +10,7 @@ Source: https://raw.githubusercontent.com/fuimeng85/mt5-breakout-ea/main/Experts
 //| 2) 重构CountOrdersPerTF，精准独立统计各MODE持仓量                |
 //| 3) 增加 InpMaxOrdersPerTF_Mode3 参数                             |
 //+------------------------------------------------------------------+
+#include <Trade/Trade.mqh>
 
 CTrade trade;
 
@@ -379,8 +380,7 @@ bool LoadRuntimeState()
    g_breakCandleHigh   = GlobalVariableGet(p + "breakHigh");
    g_xBarsLow          = GlobalVariableGet(p + "xLow");
 
-# include <Trade/Trade.mqh>
-g_xBarsHigh         = GlobalVariableGet(p + "xHigh");
+   g_xBarsHigh         = GlobalVariableGet(p + "xHigh");
    g_peakHigh          = GlobalVariableGet(p + "peakHigh");
    g_troughLow         = GlobalVariableGet(p + "troughLow");
    g_lastHTFClosedT1   = (datetime)((long)GlobalVariableGet(p + "lastHTFClosedT1"));
@@ -415,7 +415,7 @@ g_xBarsHigh         = GlobalVariableGet(p + "xHigh");
 
 // --- per ticket modify throttle
 
-# define MAX_TRACK 200
+#define MAX_TRACK 200
 ulong    g_trkTicket[MAX_TRACK];
 datetime g_trkLastMod[MAX_TRACK];
 
