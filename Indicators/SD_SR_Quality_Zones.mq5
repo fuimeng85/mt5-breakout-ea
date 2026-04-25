@@ -3,6 +3,8 @@
 #property indicator_plots 0
 
 input int      InpScanBars            = 500;   // 扫描K线数量
+input bool     InpUseScanDays         = true;  // 是否按天数扩展扫描，避免H1/H4显示差异过大
+input int      InpScanDays            = 120;   // 扫描天数（启用时会取 max(ScanBars, ScanDays对应bar数)）
 input int      InpPivotN              = 3;     // Pivot窗口N（左右各N根）
 input int      InpBaseMin             = 2;     // Base最小根数
 input int      InpBaseMax             = 6;     // Base最大根数
@@ -16,6 +18,12 @@ input double   InpBreakBufferATR      = 0.1;   // 失效缓冲（ATR倍数）
 input double   InpSRMergeATR          = 0.3;   // S/R聚类容差（ATR倍数）
 input int      InpMaxDrawSR           = 8;     // 最多绘制S/R区域
 input int      InpMaxDrawZones        = 10;    // 最多绘制供需区域
+input bool     InpFilterSRByDistance  = false; // 中小级别想多看线时建议false；true则启用距离过滤
+input double   InpMaxSRDistanceATR    = 25.0;  // 启用过滤时：仅显示距离当前价格<=N*ATR的S/R
+input bool     InpShowSRLevelLabel    = true;  // 显示S/R级别标签（LOW/MID/HIGH + 周期）
+input color    InpSRLowColor          = clrSilver;
+input color    InpSRMidColor          = clrGold;
+input color    InpSRHighColor         = clrMediumOrchid;
 input bool     InpDebugShowStats      = true;  // 显示扫描统计（用于排查“图上无显示”）
 
 string PREFIX = "SD_SR_QZ_";
@@ -175,6 +183,20 @@ double ClampScore(const double v)
    return v;
 }
 
+string SRLevelName(const int touches)
+{
+   if(touches >= 5) return "HIGH";
+   if(touches >= 3) return "MID";
+   return "LOW";
+}
+
+color SRLevelColor(const int touches)
+{
+   if(touches >= 5) return InpSRHighColor;
+   if(touches >= 3) return InpSRMidColor;
+   return InpSRLowColor;
+}
+
 void DrawSR(const SRCluster &sr, const int idx, const datetime &time[])
 {
    string nm = ObjName(sr.is_resistance ? "RES" : "SUP", idx);
@@ -182,10 +204,25 @@ void DrawSR(const SRCluster &sr, const int idx, const datetime &time[])
    if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, center))
       return;
 
-   color c = sr.is_resistance ? clrIndianRed : clrSeaGreen;
+   color c = SRLevelColor(sr.touches);
    ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
    ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DOT);
    ObjectSetInteger(0, nm, OBJPROP_WIDTH, 2);
+
+   if(InpShowSRLevelLabel)
+   {
+      string lb = nm + "_LBL";
+      if(ObjectCreate(0, lb, OBJ_TEXT, 0, time[0], center))
+      {
+         string side = sr.is_resistance ? "RES" : "SUP";
+         string txt = StringFormat("%s-%s %s", side, SRLevelName(sr.touches), EnumToString(_Period));
+         ObjectSetString(0, lb, OBJPROP_TEXT, txt);
+         ObjectSetInteger(0, lb, OBJPROP_COLOR, c);
+         ObjectSetInteger(0, lb, OBJPROP_FONTSIZE, 8);
+         ObjectSetString(0, lb, OBJPROP_FONT, "Arial");
+         ObjectSetInteger(0, lb, OBJPROP_ANCHOR, ANCHOR_RIGHT);
+      }
+   }
 }
 
 void DrawZone(const SDZone &z, const int idx, const datetime &time[])
@@ -268,6 +305,14 @@ int OnCalculate(const int rates_total,
       return rates_total;
 
    int scan = MathMin(InpScanBars, rates_total - 1);
+   if(InpUseScanDays && InpScanDays > 0)
+   {
+      datetime cutoff = time[0] - (datetime)(InpScanDays * 86400);
+      int bars_by_days = 0;
+      while((bars_by_days + 1) < rates_total && time[bars_by_days] >= cutoff)
+         bars_by_days++;
+      scan = MathMin(rates_total - 1, MathMax(scan, bars_by_days));
+   }
    if(scan <= InpPivotN*2 + 10)
       return rates_total;
 
@@ -290,9 +335,16 @@ int OnCalculate(const int rates_total,
    }
    SortSR(sr_list);
 
-   int draw_sr = MathMin(InpMaxDrawSR, ArraySize(sr_list));
-   for(int i=0; i<draw_sr; i++)
-      DrawSR(sr_list[i], i, time);
+   int draw_sr = 0;
+   double atr0 = atr[0];
+   for(int i=0; i<ArraySize(sr_list) && draw_sr < InpMaxDrawSR; i++)
+   {
+      double center = (sr_list[i].top + sr_list[i].bottom) * 0.5;
+      if(InpFilterSRByDistance && atr0 > 0.0 && MathAbs(center - close[0]) > InpMaxSRDistanceATR * atr0)
+         continue;
+      DrawSR(sr_list[i], draw_sr, time);
+      draw_sr++;
+   }
 
    // 2) Supply / Demand
    SDZone zones[];
@@ -486,7 +538,12 @@ int OnCalculate(const int rates_total,
       string dbg = ObjName("DBG", 1);
       if(ObjectCreate(0, dbg, OBJ_LABEL, 0, 0, 0))
       {
-         string text = StringFormat("SD/SR Scan=%d  SR=%d  ZonesDrawn=%d", scan, ArraySize(sr_list), draw_z);
+         string text = StringFormat("SD/SR %s Scan=%d  SR=%d  Zones=%d DistFilter=%s",
+                                    EnumToString(_Period),
+                                    scan,
+                                    draw_sr,
+                                    draw_z,
+                                    (InpFilterSRByDistance ? "ON" : "OFF"));
          ObjectSetString(0, dbg, OBJPROP_TEXT, text);
          ObjectSetInteger(0, dbg, OBJPROP_COLOR, clrWhite);
          ObjectSetInteger(0, dbg, OBJPROP_FONTSIZE, 9);
