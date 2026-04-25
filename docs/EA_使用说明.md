@@ -195,3 +195,39 @@
 - 先单账号、小手数、短周期回测 + 可视化测试。
 - 先关复杂开关（BreakScan/IgnoreDonchian），逐项开启。
 - 固定 Magic，避免多个EA实例混淆管理。
+
+---
+
+## 7. 新增可视化工具：高质量供需 + 支撑阻力扫描器
+
+文件：`Indicators/SD_SR_Quality_Zones.mq5`
+
+用途：
+- 扫描最近500根K线（可调）
+- 用 Pivot 方式绘制支撑/阻力区域
+- 识别高质量 Supply / Demand 区域（Base + 大实体离开）
+- 支持“激进触区即提示”与“仅首次回踩”
+
+关键参数（默认值）：
+- `InpScanBars=500`
+- `InpUseScanDays=true`
+- `InpScanDays=120`（跨周期对齐扫描时间范围，减少“H1无、H4有”）
+- `InpPivotN=3`
+- `InpBaseMin=2`
+- `InpBaseMax=6`
+- `InpImpulseBodyFactor=2.0`
+- `InpMinQualityScore=70`
+- `InpAggressiveEntry=true`
+- `InpFirstRetestOnly=true`
+- `InpFilterSRByDistance=false`（中小级别可见性优先建议关闭）
+- `InpMaxSRDistanceATR=25.0`（过滤离现价过远的S/R，避免远古高点线占满名额）
+- `InpShowSRLevelLabel=true`（在线上显示级别和周期）
+- `InpSRLowColor / InpSRMidColor / InpSRHighColor`（不同级别线颜色）
+- `InpDebugShowStats=true`（左上角显示扫描统计，便于排查“图上无任何显示”）
+
+排查建议（如果加载后看不到区域）：
+- 先把图表切到流动性较高的品种/周期（如 EURUSD M15/H1）。
+- 保持 `InpScanBars=500`，并确认图表历史K线数量足够。
+- 看左上角统计是否出现 `SR` 与 `ZonesDrawn`；若 `ZonesDrawn=0`，可先把 `InpMinQualityScore` 临时下调到 60 做验证。
+- 如果出现“H1几乎没线、H4有很多旧线”：开启 `InpUseScanDays=true` 并提高 `InpScanDays`，同时设置 `InpMaxSRDistanceATR` 过滤远离当前价格的历史线。
+- 如果你希望在 M15/M30/H1 看见更多线：把 `InpFilterSRByDistance=false`（关闭距离过滤）。
