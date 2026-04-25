@@ -16,6 +16,7 @@ input double   InpBreakBufferATR      = 0.1;   // 失效缓冲（ATR倍数）
 input double   InpSRMergeATR          = 0.3;   // S/R聚类容差（ATR倍数）
 input int      InpMaxDrawSR           = 8;     // 最多绘制S/R区域
 input int      InpMaxDrawZones        = 10;    // 最多绘制供需区域
+input bool     InpDebugShowStats      = true;  // 显示扫描统计（用于排查“图上无显示”）
 
 string PREFIX = "SD_SR_QZ_";
 
@@ -177,18 +178,14 @@ double ClampScore(const double v)
 void DrawSR(const SRCluster &sr, const int idx, const datetime &time[])
 {
    string nm = ObjName(sr.is_resistance ? "RES" : "SUP", idx);
-   datetime t1 = time[MathMin(InpScanBars-1, Bars(_Symbol, _Period)-1)];
-   datetime t2 = time[0];
-
-   if(!ObjectCreate(0, nm, OBJ_RECTANGLE, 0, t1, sr.top, t2, sr.bottom))
+   double center = (sr.top + sr.bottom) * 0.5;
+   if(!ObjectCreate(0, nm, OBJ_HLINE, 0, 0, center))
       return;
 
    color c = sr.is_resistance ? clrIndianRed : clrSeaGreen;
    ObjectSetInteger(0, nm, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, true);
-   ObjectSetInteger(0, nm, OBJPROP_FILL, true);
-   ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DOT);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH, 2);
 }
 
 void DrawZone(const SDZone &z, const int idx, const datetime &time[])
@@ -322,7 +319,8 @@ int OnCalculate(const int rates_total,
          if(atr_v <= 0.0)
             continue;
 
-         if(base_range > 1.2 * atr_v)
+         // 放宽base限制，避免有效区被过度过滤
+         if(base_range > 2.0 * atr_v)
             continue;
 
          double body_imp = CandleBody(imp, open, close);
@@ -332,7 +330,8 @@ int OnCalculate(const int rates_total,
 
          bool up_imp = (close[imp] > open[imp]);
          bool dn_imp = (close[imp] < open[imp]);
-         bool big_imp = (body_imp >= InpImpulseBodyFactor * mean_body);
+         double impulse_need = MathMax(InpImpulseBodyFactor * mean_body, 0.8 * atr_v);
+         bool big_imp = (body_imp >= impulse_need);
          if(!big_imp || (!up_imp && !dn_imp))
             continue;
 
@@ -340,9 +339,9 @@ int OnCalculate(const int rates_total,
          // 评分
          double score = 0.0;
 
-         // A. 离开强度 0~35
+         // A. 离开强度 0~45
          double impulse_ratio = body_imp / mean_body;
-         score += MathMin(35.0, (impulse_ratio / InpImpulseBodyFactor) * 25.0);
+         score += MathMin(35.0, (impulse_ratio / InpImpulseBodyFactor) * 35.0);
          // 连续动量加分
          int cont = 0;
          for(int p=imp-1; p>=MathMax(0, imp-3); p--)
@@ -352,11 +351,11 @@ int OnCalculate(const int rates_total,
          }
          score += MathMin(10.0, cont * 5.0);
 
-         // B. Base干净度 0~20
-         double compact = 1.0 - MathMin(1.0, base_range / (1.2 * atr_v));
-         score += compact * 20.0;
+         // B. Base干净度 0~15
+         double compact = 1.0 - MathMin(1.0, base_range / (2.0 * atr_v));
+         score += compact * 15.0;
 
-         // C. 新鲜度 0~20, 噪音惩罚 0~-15
+         // C. 新鲜度 0~15, 噪音惩罚 0~-10
          int retests = 0;
          int noise_breaks = 0;
          bool invalid = false;
@@ -390,13 +389,13 @@ int OnCalculate(const int rates_total,
             }
          }
 
-         if(retests == 0) score += 20.0;
-         else if(retests == 1) score += 12.0;
-         else if(retests == 2) score += 6.0;
+         if(retests == 0) score += 15.0;
+         else if(retests == 1) score += 10.0;
+         else if(retests == 2) score += 5.0;
 
-         score -= MathMin(15.0, noise_breaks * 3.0);
+         score -= MathMin(10.0, noise_breaks * 2.0);
 
-         // D. 结构位置 0~20（简单版：靠近强S/R加分）
+         // D. 结构位置 0~15（简单版：靠近强S/R加分）
          double center = (b_top + b_low) * 0.5;
          int best_touch = 0;
          for(int m=0; m<ArraySize(sr_list); m++)
@@ -405,7 +404,7 @@ int OnCalculate(const int rates_total,
             if(MathAbs(center - sr_center) <= atr_v * 0.5)
                best_touch = MathMax(best_touch, sr_list[m].touches);
          }
-         score += MathMin(20.0, best_touch * 2.5);
+         score += MathMin(15.0, best_touch * 2.0);
 
          score = ClampScore(score);
 
@@ -480,6 +479,21 @@ int OnCalculate(const int rates_total,
 
       zones[best].score = -1.0;
       draw_z++;
+   }
+
+   if(InpDebugShowStats)
+   {
+      string dbg = ObjName("DBG", 1);
+      if(ObjectCreate(0, dbg, OBJ_LABEL, 0, 0, 0))
+      {
+         string text = StringFormat("SD/SR Scan=%d  SR=%d  ZonesDrawn=%d", scan, ArraySize(sr_list), draw_z);
+         ObjectSetString(0, dbg, OBJPROP_TEXT, text);
+         ObjectSetInteger(0, dbg, OBJPROP_COLOR, clrWhite);
+         ObjectSetInteger(0, dbg, OBJPROP_FONTSIZE, 9);
+         ObjectSetInteger(0, dbg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+         ObjectSetInteger(0, dbg, OBJPROP_XDISTANCE, 10);
+         ObjectSetInteger(0, dbg, OBJPROP_YDISTANCE, 20);
+      }
    }
 
    return rates_total;

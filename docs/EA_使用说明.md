@@ -217,3 +217,9 @@
 - `InpMinQualityScore=70`
 - `InpAggressiveEntry=true`
 - `InpFirstRetestOnly=true`
+- `InpDebugShowStats=true`（左上角显示扫描统计，便于排查“图上无任何显示”）
+
+排查建议（如果加载后看不到区域）：
+- 先把图表切到流动性较高的品种/周期（如 EURUSD M15/H1）。
+- 保持 `InpScanBars=500`，并确认图表历史K线数量足够。
+- 看左上角统计是否出现 `SR` 与 `ZonesDrawn`；若 `ZonesDrawn=0`，可先把 `InpMinQualityScore` 临时下调到 60 做验证。
