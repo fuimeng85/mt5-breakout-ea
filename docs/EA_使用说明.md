@@ -195,3 +195,25 @@
 - 先单账号、小手数、短周期回测 + 可视化测试。
 - 先关复杂开关（BreakScan/IgnoreDonchian），逐项开启。
 - 固定 Magic，避免多个EA实例混淆管理。
+
+---
+
+## 7. 新增可视化工具：高质量供需 + 支撑阻力扫描器
+
+文件：`Indicators/SD_SR_Quality_Zones.mq5`
+
+用途：
+- 扫描最近500根K线（可调）
+- 用 Pivot 方式绘制支撑/阻力区域
+- 识别高质量 Supply / Demand 区域（Base + 大实体离开）
+- 支持“激进触区即提示”与“仅首次回踩”
+
+关键参数（默认值）：
+- `InpScanBars=500`
+- `InpPivotN=3`
+- `InpBaseMin=2`
+- `InpBaseMax=6`
+- `InpImpulseBodyFactor=2.0`
+- `InpMinQualityScore=70`
+- `InpAggressiveEntry=true`
+- `InpFirstRetestOnly=true`
