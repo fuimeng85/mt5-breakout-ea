@@ -2,5 +2,5 @@
 BreakOut EA
 
 ## Build note
-Compile only: `Experts/Breakout.mq5`
-Do not compile temporary copies like `Breakout(1).mq5`, `Breakout(6).mq5`.
+Compile only: `Experts/Breakout.mq5` (canonical release file).
+Legacy snapshots such as `Breakout 588.mq5`, `Breakout(v5.55).mq5` are kept for reference only.
